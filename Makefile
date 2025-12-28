@@ -76,8 +76,8 @@ phase1-smoke:
 	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/nas-operator --timeout=180s
 
 	@echo "== Waiting for OpenEBS ZFS CSI components (kube-system) =="
-	-$(KUBECTL) -n kube-system rollout status deploy/openebs-zfs-controller --timeout=240s
-	-$(KUBECTL) -n kube-system rollout status ds/openebs-zfs-node --timeout=240s
+	-$(KUBECTL) -n kube-system rollout status deploy/openebs-zfs-localpv-controller --timeout=240s
+	-$(KUBECTL) -n kube-system rollout status ds/openebs-zfs-localpv-node --timeout=240s
 
 	@echo "== Phase1 CRs =="
 	-$(KUBECTL) -n $(NAMESPACE) get zpool,zdataset,zsnapshot,zsnapshotrestore 2>/dev/null || true
