@@ -88,22 +88,7 @@ deploy-phase1: deploy-crds deploy-node-agent deploy-operator deploy-storage
 	@$(MAKE) phase1-smoke
 
 phase1-smoke:
-	@echo "== Waiting for namespace $(NAMESPACE) =="
-	$(KUBECTL) get ns $(NAMESPACE) >/dev/null 2>&1 || (echo "Namespace missing"; exit 1)
-
-	@echo "== Waiting for node-agent DaemonSet =="
-	$(KUBECTL) -n $(NAMESPACE) rollout status ds/nas-node-agent --timeout=180s
-
-	@echo "== Waiting for operator =="
-	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/nas-operator --timeout=180s
-
-	@echo "== Waiting for OpenEBS ZFS CSI components (kube-system) =="
-	-$(KUBECTL) -n kube-system rollout status deploy/openebs-zfs-localpv-controller --timeout=240s
-	-$(KUBECTL) -n kube-system rollout status ds/openebs-zfs-localpv-node --timeout=240s
-
-	@echo "== Phase1 CRs =="
-	-$(KUBECTL) -n $(NAMESPACE) get zpool,zdataset,zsnapshot,zsnapshotrestore 2>/dev/null || true
-	-$(KUBECTL) -n $(NAMESPACE) get pvc,pod,volumesnapshot 2>/dev/null || true
+	KUBECTL="$(KUBECTL)" NAMESPACE="$(NAMESPACE)" ./scripts/phase1-health.sh
 
 	@echo "== Helpful commands =="
 	@echo "kubectl -n $(NAMESPACE) describe zpool test-pool"

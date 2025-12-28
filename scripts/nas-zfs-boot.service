@@ -1,0 +1,14 @@
+[Unit]
+Description=NAS ZFS import and mount
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/nas-zfs-boot
+Environment=REPO_ROOT=/opt/nas
+ExecStart=/usr/bin/env bash -c "${REPO_ROOT}/scripts/zfs-boot.sh"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

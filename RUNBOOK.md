@@ -116,11 +116,28 @@ Phase 1 includes:
 make deploy-phase1
 ```
 
+### Ensure pools/datasets mount after reboot (optional)
+To make the "dataset survives reboot" criterion explicit, enable the ZFS boot
+unit so pools are imported and datasets mounted on startup:
+```bash
+sudo cp scripts/nas-zfs-boot.service /etc/systemd/system/nas-zfs-boot.service
+sudo tee /etc/default/nas-zfs-boot >/dev/null <<'EOF'
+REPO_ROOT=/opt/nas
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now nas-zfs-boot.service
+```
+
 ### Phase 1 verify
 ```bash
 kubectl -n nas-system get pods -o wide
 kubectl -n nas-system get zpool,zdataset,zsnapshot,zsnapshotrestore
 kubectl -n nas-system get pvc,pv,volumesnapshot
+```
+
+### Phase 1 health script (optional)
+```bash
+./scripts/phase1-health.sh
 ```
 
 Wait until:
