@@ -124,15 +124,26 @@ ip a
 SMB NodePort for home share defaults to `30445`.
 On macOS Finder:
 - Go → Connect to Server
-- `smb://<VM-IP>:30445`
+- `smb://<VM-IP>:30445/home`
 
 Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml`.
+
+If `.zfs/snapshot` is missing on the share, ensure the dataset is mounted and reconnect:
+```bash
+sudo zfs get mounted,snapdir tank/home
+sudo zfs mount tank/home
+```
+Then disconnect/reconnect the share and check in Terminal:
+```bash
+ls /Volumes/home/.zfs/snapshot
+```
 
 ## 10) Validate snapshots and Previous Versions
 - Create a file in the SMB share
 - Wait 2–4 minutes (sample schedule is every 2 minutes)
 - Modify/delete the file
 - On Windows: right-click → Properties → Previous Versions
+ - On macOS: list `.zfs/snapshot` and copy a file out of a snapshot to confirm content
 
 ## 11) Restore by clone
 1. List snapshots from ZFS (inside node):

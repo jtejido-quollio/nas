@@ -35,10 +35,28 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	spec := obj.Spec
 	shareName := spec.ShareName
+	datasetName := spec.DatasetName
 	mountPath := spec.MountPath
 	readOnly := spec.ReadOnly
 	svcType := spec.ServiceType
 	nodePort64 := int64(spec.NodePort)
+
+	if strings.TrimSpace(datasetName) != "" {
+		na := NewNodeAgentClient(r.Cfg)
+		body := map[string]any{
+			"dataset": datasetName,
+		}
+		if strings.TrimSpace(mountPath) != "" {
+			body["mountpoint"] = mountPath
+		}
+		var out map[string]any
+		if err := na.do(ctx, "POST", "/v1/zfs/dataset/mount", body, &out, nil); err != nil {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, &obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
 
 	// Options - best-effort map into our allowlisted renderer
 	opts := parseOptions(spec.Options)

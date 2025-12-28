@@ -99,6 +99,11 @@ type ZDatasetEnsureRequestV2 struct {
 	Properties map[string]string `json:"properties,omitempty"`
 }
 
+type ZDatasetMountRequest struct {
+	Dataset    string `json:"dataset"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+}
+
 type ZDatasetStatusResponse struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output,omitempty"`
@@ -329,6 +334,28 @@ func main() {
 		}
 		full := strings.TrimSpace(req.Pool) + "/" + strings.TrimSpace(req.Name)
 		out, err := ensureDataset(full, req.Mountpoint, req.Properties)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ZDatasetStatusResponse{OK: false, Output: out, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, ZDatasetStatusResponse{OK: true, Output: out})
+	})
+
+	mux.HandleFunc("/v1/zfs/dataset/mount", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req ZDatasetMountRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, ZDatasetStatusResponse{OK: false, Error: "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.Dataset) == "" {
+			writeJSON(w, http.StatusBadRequest, ZDatasetStatusResponse{OK: false, Error: "dataset required"})
+			return
+		}
+		out, err := ensureDatasetMounted(req.Dataset, req.Mountpoint)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZDatasetStatusResponse{OK: false, Output: out, Error: err.Error()})
 			return
@@ -750,6 +777,35 @@ func ensureDataset(full string, mountpoint string, props map[string]string) (str
 	}
 	if mp := strings.TrimSpace(mountpoint); mp != "" {
 		_, _ = runCmdCombined(context.Background(), 30*time.Second, "zfs", "set", "mountpoint="+mp, full)
+	}
+	return out, nil
+}
+
+func ensureDatasetMounted(full string, mountpoint string) (string, error) {
+	full = strings.TrimSpace(full)
+	if full == "" {
+		return "", errors.New("dataset empty")
+	}
+
+	if mp := strings.TrimSpace(mountpoint); mp != "" {
+		_, _ = runCmdCombined(context.Background(), 30*time.Second, "zfs", "set", "mountpoint="+mp, full)
+	}
+
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "get", "-H", "-o", "value", "mounted", full)
+	if err != nil {
+		return out, fmt.Errorf("zfs get mounted failed: %w", err)
+	}
+	if strings.TrimSpace(out) == "yes" {
+		return out, nil
+	}
+
+	out, err = runCmdCombined(context.Background(), 60*time.Second, "zfs", "mount", full)
+	if err != nil {
+		lo := strings.ToLower(out)
+		if strings.Contains(lo, "already mounted") {
+			return out, nil
+		}
+		return out, err
 	}
 	return out, nil
 }
