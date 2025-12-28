@@ -32,8 +32,8 @@ images:
 	$(DOCKER) build -f build/operator.Dockerfile -t $(IMG_OPERATOR) .
 
 save-images:
-	$(DOCKER) save --format docker-archive -o $(NODE_AGENT_TAR) $(IMG_NODE_AGENT)
-	$(DOCKER) save --format docker-archive -o $(OPERATOR_TAR) $(IMG_OPERATOR)
+	$(DOCKER) save -o $(NODE_AGENT_TAR) $(IMG_NODE_AGENT)
+	$(DOCKER) save -o $(OPERATOR_TAR) $(IMG_OPERATOR)
 
 load-images: save-images
 	$(K3S_CTR) images import $(NODE_AGENT_TAR)
