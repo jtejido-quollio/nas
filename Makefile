@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 KUBECTL ?= kubectl
 KUSTOMIZE ?= kustomize
-PODMAN ?= podman
+DOCKER ?= docker
 K3S_CTR ?= k3s ctr
 IMAGE_TAR_DIR ?= /tmp
 NODE_AGENT_TAR ?= $(IMAGE_TAR_DIR)/nas-node-agent.tar
@@ -28,12 +28,12 @@ build:
 	GOOS=linux GOARCH=amd64 go build -o bin/operator ./cmd/operator
 
 images:
-	$(PODMAN) build -f build/node-agent.Dockerfile -t $(IMG_NODE_AGENT) .
-	$(PODMAN) build -f build/operator.Dockerfile -t $(IMG_OPERATOR) .
+	$(DOCKER) build -f build/node-agent.Dockerfile -t $(IMG_NODE_AGENT) .
+	$(DOCKER) build -f build/operator.Dockerfile -t $(IMG_OPERATOR) .
 
 save-images:
-	$(PODMAN) save --format docker-archive -o $(NODE_AGENT_TAR) $(IMG_NODE_AGENT)
-	$(PODMAN) save --format docker-archive -o $(OPERATOR_TAR) $(IMG_OPERATOR)
+	$(DOCKER) save --format docker-archive -o $(NODE_AGENT_TAR) $(IMG_NODE_AGENT)
+	$(DOCKER) save --format docker-archive -o $(OPERATOR_TAR) $(IMG_OPERATOR)
 
 load-images: save-images
 	$(K3S_CTR) images import $(NODE_AGENT_TAR)
