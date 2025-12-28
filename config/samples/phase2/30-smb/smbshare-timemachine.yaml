@@ -22,6 +22,8 @@ spec:
     guestOk: false
     validUsers: ["alice"]
     writeList: ["alice"]
+    autoPermissions:
+      mode: "0777"
     timeMachine:
       enabled: true
       advertiseAsTimeMachine: true

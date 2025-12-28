@@ -22,6 +22,26 @@ sudo apt-get install -y curl git make
 sudo apt-get install -y zfsutils-linux
 ```
 
+### Optional: bootstrap script
+This repo includes a bootstrap helper for Phase 0 setup (ZFS + k3s + core pods):
+```bash
+./scripts/bootstrap.sh --build-images
+```
+Use `--skip-deploy` if you only want dependencies installed.
+
+### Optional: systemd service wrapper
+To run the bootstrap at boot, use the unit in `scripts/nas-bootstrap.service`:
+```bash
+sudo cp scripts/nas-bootstrap.service /etc/systemd/system/nas-bootstrap.service
+sudo tee /etc/default/nas-bootstrap >/dev/null <<'EOF'
+REPO_ROOT=/opt/nas
+BOOTSTRAP_OPTS=--build-images
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now nas-bootstrap.service
+```
+Adjust `REPO_ROOT` to where the repo lives.
+
 If `kubectl` is not installed on the VM, k3s bundles it:
 ```bash
 sudo k3s kubectl get nodes
@@ -31,6 +51,12 @@ To keep using `kubectl` in commands below, either install `kubectl` or run:
 ```bash
 export KUBECTL="sudo k3s kubectl"
 alias kubectl="sudo k3s kubectl"
+```
+
+### Phase 0 smoke (optional)
+```bash
+make deploy-phase0
+make phase0-smoke NODE_AGENT_URL=http://<node-ip>:9808
 ```
 
 ## 2) Verify k3s is running
@@ -127,6 +153,8 @@ On macOS Finder:
 - `smb://<VM-IP>:30445/home`
 
 Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml`.
+Samples set `options.autoPermissions.mode: "0777"` to chmod the dataset mountpoint
+for SMB writes. Remove it if you want to manage permissions manually.
 
 If `.zfs/snapshot` is missing on the share, ensure the dataset is mounted and reconnect:
 ```bash

@@ -1,0 +1,15 @@
+[Unit]
+Description=NAS bootstrap (ZFS + k3s + core pods)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/nas-bootstrap
+Environment=REPO_ROOT=/opt/nas
+Environment=BOOTSTRAP_OPTS=--build-images
+ExecStart=/usr/bin/env bash -c "${REPO_ROOT}/scripts/bootstrap.sh ${BOOTSTRAP_OPTS}"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

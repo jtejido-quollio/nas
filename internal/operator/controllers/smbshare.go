@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,11 +44,17 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if strings.TrimSpace(datasetName) != "" {
 		na := NewNodeAgentClient(r.Cfg)
-		body := map[string]any{
-			"dataset": datasetName,
-		}
+		body := map[string]any{"dataset": datasetName}
 		if strings.TrimSpace(mountPath) != "" {
 			body["mountpoint"] = mountPath
+		}
+		if perms := parseAutoPermissions(spec.Options); perms != nil {
+			if strings.TrimSpace(perms.Mode) != "" {
+				body["mode"] = perms.Mode
+			}
+			if perms.Recursive {
+				body["recursive"] = true
+			}
 		}
 		var out map[string]any
 		if err := na.do(ctx, "POST", "/v1/zfs/dataset/mount", body, &out, nil); err != nil {
@@ -299,6 +306,50 @@ func parseOptions(m map[string]any) smbconf.Options {
 	}
 
 	return o
+}
+
+type AutoPermissions struct {
+	Mode      string
+	Recursive bool
+}
+
+func parseAutoPermissions(m map[string]any) *AutoPermissions {
+	if m == nil {
+		return nil
+	}
+	raw, ok := m["autoPermissions"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case bool:
+		if !v {
+			return nil
+		}
+		return &AutoPermissions{Mode: "0777"}
+	case map[string]any:
+		if enabled, ok := v["enabled"].(bool); ok && !enabled {
+			return nil
+		}
+		mode := ""
+		switch mv := v["mode"].(type) {
+		case string:
+			mode = strings.TrimSpace(mv)
+		case float64:
+			mode = strconv.FormatInt(int64(mv), 10)
+		case int:
+			mode = strconv.Itoa(mv)
+		case int64:
+			mode = strconv.FormatInt(mv, 10)
+		}
+		if mode == "" {
+			mode = "0777"
+		}
+		rec, _ := v["recursive"].(bool)
+		return &AutoPermissions{Mode: mode, Recursive: rec}
+	default:
+		return nil
+	}
 }
 
 func boolPtr(b bool) *bool { return &b }

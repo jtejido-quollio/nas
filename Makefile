@@ -5,16 +5,19 @@ KUSTOMIZE ?= kustomize
 DOCKER ?= docker
 K3S_CTR ?= k3s ctr
 PLATFORM ?=
+CURL ?= curl
 IMAGE_TAR_DIR ?= /tmp
 NODE_AGENT_TAR ?= $(IMAGE_TAR_DIR)/nas-node-agent.tar
 OPERATOR_TAR ?= $(IMAGE_TAR_DIR)/nas-operator.tar
 OPENEBS_ZFS_MANIFEST ?= https://raw.githubusercontent.com/openebs/zfs-localpv/master/deploy/zfs-operator.yaml
+NODE_AGENT_URL ?= http://127.0.0.1:9808
 
 NAMESPACE ?= nas-system
 IMG_NODE_AGENT ?= localhost/nas-node-agent:dev
 IMG_OPERATOR ?= localhost/nas-operator:dev
 
 .PHONY: fmt tidy build images save-images load-images \
+  deploy-phase0 phase0-smoke cleanup-phase0 \
   deploy-crds deploy-node-agent deploy-operator deploy-storage \
   deploy-phase1 phase1-smoke cleanup-phase1 \
   deploy-phase2 phase2-smoke cleanup-phase2
@@ -40,6 +43,24 @@ save-images:
 load-images: save-images
 	$(K3S_CTR) images import $(NODE_AGENT_TAR)
 	$(K3S_CTR) images import $(OPERATOR_TAR)
+
+deploy-phase0: deploy-node-agent
+	@echo "Phase0 resources applied."
+
+phase0-smoke:
+	@echo "== Node-agent health =="
+	$(CURL) -sf $(NODE_AGENT_URL)/health
+	@echo ""
+	@echo "== Disks =="
+	$(CURL) -sf $(NODE_AGENT_URL)/v1/disks
+	@echo ""
+	@echo "== Disk cache status =="
+	$(CURL) -sf $(NODE_AGENT_URL)/v1/disks/updated
+	@echo ""
+
+cleanup-phase0:
+	-$(KUBECTL) delete -k config/node-agent --ignore-not-found=true
+	@echo "Phase0 cleanup complete."
 
 deploy-crds:
 	$(KUBECTL) apply -k config/crd

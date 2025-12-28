@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +30,33 @@ type Disk struct {
 type DiskList struct {
 	Disks []Disk `json:"disks"`
 }
+
+type DiskCacheStatus struct {
+	Updated string `json:"updated,omitempty"`
+	Count   int    `json:"count"`
+}
+
+type SmartResponse struct {
+	OK     bool            `json:"ok"`
+	Device string          `json:"device,omitempty"`
+	Output string          `json:"output,omitempty"`
+	JSON   map[string]any  `json:"json,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+type SmartAllResponse struct {
+	OK     bool            `json:"ok"`
+	Items  []SmartResponse `json:"items,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+var diskCache struct {
+	mu      sync.RWMutex
+	disks   []Disk
+	updated time.Time
+}
+
+var diskRefreshCh = make(chan struct{}, 1)
 
 // Legacy pool create (kept for backward compatibility)
 type ZPoolCreateRequest struct {
@@ -102,6 +132,8 @@ type ZDatasetEnsureRequestV2 struct {
 type ZDatasetMountRequest struct {
 	Dataset    string `json:"dataset"`
 	Mountpoint string `json:"mountpoint,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	Recursive  bool   `json:"recursive,omitempty"`
 }
 
 type ZDatasetStatusResponse struct {
@@ -152,8 +184,67 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		out := DiskList{Disks: discoverDisks()}
+		refresh := strings.TrimSpace(r.URL.Query().Get("refresh"))
+		if refresh == "1" || strings.EqualFold(refresh, "true") {
+			refreshDiskCache()
+		} else if len(getDiskCache()) == 0 {
+			refreshDiskCache()
+		}
+		out := DiskList{Disks: getDiskCache()}
 		writeJSON(w, http.StatusOK, out)
+	})
+
+	mux.HandleFunc("/v1/disks/updated", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		status := getDiskCacheStatus()
+		writeJSON(w, http.StatusOK, status)
+	})
+
+	mux.HandleFunc("/v1/disks/smart", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if _, err := exec.LookPath("smartctl"); err != nil {
+			writeJSON(w, http.StatusInternalServerError, SmartResponse{OK: false, Error: "smartctl not found"})
+			return
+		}
+		timeout := parseSmartTimeout(r.URL.Query().Get("timeout"))
+		useJSON := !isFalse(r.URL.Query().Get("json"))
+		device := strings.TrimSpace(r.URL.Query().Get("device"))
+		if device == "" {
+			device = strings.TrimSpace(r.URL.Query().Get("id"))
+		}
+		if device == "" {
+			all := strings.TrimSpace(r.URL.Query().Get("all"))
+			if all != "" && all != "0" && !strings.EqualFold(all, "false") {
+				refresh := strings.TrimSpace(r.URL.Query().Get("refresh"))
+				if refresh == "1" || strings.EqualFold(refresh, "true") {
+					refreshDiskCache()
+				} else if len(getDiskCache()) == 0 {
+					refreshDiskCache()
+				}
+				var items []SmartResponse
+				for _, d := range getDiskCache() {
+					resp := probeSmart(d.Path, timeout, useJSON)
+					items = append(items, resp)
+				}
+				writeJSON(w, http.StatusOK, SmartAllResponse{OK: true, Items: items})
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, SmartResponse{OK: false, Error: "device or all=1 required"})
+			return
+		}
+		path := resolveDiskPath(device)
+		if path == "" {
+			writeJSON(w, http.StatusBadRequest, SmartResponse{OK: false, Error: "device not found"})
+			return
+		}
+		resp := probeSmart(path, timeout, useJSON)
+		writeJSON(w, http.StatusOK, resp)
 	})
 
 	// ----- Pools -----
@@ -355,7 +446,12 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, ZDatasetStatusResponse{OK: false, Error: "dataset required"})
 			return
 		}
-		out, err := ensureDatasetMounted(req.Dataset, req.Mountpoint)
+		mode := strings.TrimSpace(req.Mode)
+		if mode != "" && !isOctalMode(mode) {
+			writeJSON(w, http.StatusBadRequest, ZDatasetStatusResponse{OK: false, Error: "mode must be octal (e.g. 0777)"})
+			return
+		}
+		out, err := ensureDatasetMounted(req.Dataset, req.Mountpoint, mode, req.Recursive)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZDatasetStatusResponse{OK: false, Output: out, Error: err.Error()})
 			return
@@ -428,6 +524,10 @@ func main() {
 		}
 		writeJSON(w, http.StatusOK, ZPoolOpResponse{OK: true, Output: out})
 	})
+
+	refreshDiskCache()
+	go startDiskRefreshLoop(context.Background())
+	go startUdevMonitor(context.Background())
 
 	server := &http.Server{Addr: addr, Handler: mux}
 	log.Printf("node-agent listening on %s", addr)
@@ -733,6 +833,18 @@ func parseUint(s string) uint64 {
 	return n
 }
 
+func isOctalMode(s string) bool {
+	if len(s) < 3 || len(s) > 4 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '7' {
+			return false
+		}
+	}
+	return true
+}
+
 // -----------------
 // Dataset operations
 // -----------------
@@ -781,7 +893,7 @@ func ensureDataset(full string, mountpoint string, props map[string]string) (str
 	return out, nil
 }
 
-func ensureDatasetMounted(full string, mountpoint string) (string, error) {
+func ensureDatasetMounted(full string, mountpoint string, mode string, recursive bool) (string, error) {
 	full = strings.TrimSpace(full)
 	if full == "" {
 		return "", errors.New("dataset empty")
@@ -796,23 +908,235 @@ func ensureDatasetMounted(full string, mountpoint string) (string, error) {
 		return out, fmt.Errorf("zfs get mounted failed: %w", err)
 	}
 	if strings.TrimSpace(out) == "yes" {
-		return out, nil
+		return ensureMountPerms(full, mountpoint, mode, recursive, out)
 	}
 
 	out, err = runCmdCombined(context.Background(), 60*time.Second, "zfs", "mount", full)
 	if err != nil {
 		lo := strings.ToLower(out)
 		if strings.Contains(lo, "already mounted") {
-			return out, nil
+			return ensureMountPerms(full, mountpoint, mode, recursive, out)
 		}
 		return out, err
 	}
-	return out, nil
+	return ensureMountPerms(full, mountpoint, mode, recursive, out)
+}
+
+func ensureMountPerms(dataset string, mountpoint string, mode string, recursive bool, out string) (string, error) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return out, nil
+	}
+	mp := strings.TrimSpace(mountpoint)
+	if mp == "" {
+		var err error
+		mp, err = getDatasetMountpoint(dataset)
+		if err != nil {
+			return out, err
+		}
+	}
+	if mp == "" || mp == "none" || mp == "-" || mp == "legacy" {
+		return out, fmt.Errorf("mountpoint not available for %s", dataset)
+	}
+	args := []string{}
+	if recursive {
+		args = append(args, "-R")
+	}
+	args = append(args, mode, mp)
+	out2, err := runCmdCombined(context.Background(), 60*time.Second, "chmod", args...)
+	if err != nil {
+		return out2, err
+	}
+	return out2, nil
+}
+
+func getDatasetMountpoint(full string) (string, error) {
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "get", "-H", "-o", "value", "mountpoint", full)
+	if err != nil {
+		return out, fmt.Errorf("zfs get mountpoint failed: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // -----------------
 // Disk discovery
 // -----------------
+
+func refreshDiskCache() {
+	udevSettle()
+	disks := discoverDisks()
+	diskCache.mu.Lock()
+	diskCache.disks = disks
+	diskCache.updated = time.Now().UTC()
+	diskCache.mu.Unlock()
+}
+
+func getDiskCache() []Disk {
+	diskCache.mu.RLock()
+	defer diskCache.mu.RUnlock()
+	out := make([]Disk, len(diskCache.disks))
+	copy(out, diskCache.disks)
+	return out
+}
+
+func getDiskCacheStatus() DiskCacheStatus {
+	diskCache.mu.RLock()
+	defer diskCache.mu.RUnlock()
+	status := DiskCacheStatus{Count: len(diskCache.disks)}
+	if !diskCache.updated.IsZero() {
+		status.Updated = diskCache.updated.Format(time.RFC3339)
+	}
+	return status
+}
+
+func queueDiskRefresh() {
+	select {
+	case diskRefreshCh <- struct{}{}:
+	default:
+	}
+}
+
+func startDiskRefreshLoop(ctx context.Context) {
+	for {
+		select {
+		case <-diskRefreshCh:
+			time.Sleep(500 * time.Millisecond)
+			for len(diskRefreshCh) > 0 {
+				<-diskRefreshCh
+			}
+			refreshDiskCache()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func startUdevMonitor(ctx context.Context) {
+	if _, err := exec.LookPath("udevadm"); err != nil {
+		log.Printf("udevadm not found; disk refresh on udev events disabled: %v", err)
+		return
+	}
+	cmd := exec.CommandContext(ctx, "udevadm", "monitor", "--udev", "--subsystem-match=block")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("udev monitor stdout pipe failed: %v", err)
+		return
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		log.Printf("udev monitor start failed: %v", err)
+		return
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if isUdevDiskEvent(scanner.Text()) {
+			queueDiskRefresh()
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("udev monitor error: %v", err)
+	}
+	_ = cmd.Wait()
+}
+
+func isUdevDiskEvent(line string) bool {
+	if !strings.HasPrefix(line, "UDEV") {
+		return false
+	}
+	return strings.Contains(line, " add ") || strings.Contains(line, " remove ") || strings.Contains(line, " change ")
+}
+
+func parseSmartTimeout(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 60 * time.Second
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 60 * time.Second
+	}
+	if n < 5 {
+		n = 5
+	}
+	if n > 300 {
+		n = 300
+	}
+	return time.Duration(n) * time.Second
+}
+
+func isFalse(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "no":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveDiskPath(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasPrefix(ref, "/dev/") {
+		if fileExists(ref) {
+			return ref
+		}
+		return ""
+	}
+	byID := "/dev/disk/by-id/" + ref
+	if fileExists(byID) {
+		return byID
+	}
+	byPath := "/dev/disk/by-path/" + ref
+	if fileExists(byPath) {
+		return byPath
+	}
+	dev := "/dev/" + ref
+	if fileExists(dev) {
+		return dev
+	}
+	return ""
+}
+
+func probeSmart(device string, timeout time.Duration, useJSON bool) SmartResponse {
+	out, parsed, err := runSmartctl(device, timeout, useJSON)
+	resp := SmartResponse{
+		OK:     out != "",
+		Device: device,
+		Output: out,
+		JSON:   parsed,
+	}
+	if err != nil && out == "" {
+		resp.OK = false
+		resp.Error = err.Error()
+	} else if err != nil {
+		resp.Error = err.Error()
+	}
+	return resp
+}
+
+func runSmartctl(device string, timeout time.Duration, useJSON bool) (string, map[string]any, error) {
+	if !useJSON {
+		out, err := runCmdCombined(context.Background(), timeout, "smartctl", "-a", device)
+		return out, nil, err
+	}
+	out, err := runCmdCombined(context.Background(), timeout, "smartctl", "-a", "-j", device)
+	parsed := map[string]any{}
+	trim := strings.TrimSpace(out)
+	if strings.HasPrefix(trim, "{") {
+		if err := json.Unmarshal([]byte(trim), &parsed); err == nil {
+			return out, parsed, err
+		}
+	}
+	// Fallback to text output if JSON is unavailable.
+	out2, err2 := runCmdCombined(context.Background(), timeout, "smartctl", "-a", device)
+	if out2 != "" {
+		out = out2
+		err = err2
+	}
+	return out, nil, err
+}
 
 type lsblkJSON struct {
 	Blockdevices []lsblkDev `json:"blockdevices"`
