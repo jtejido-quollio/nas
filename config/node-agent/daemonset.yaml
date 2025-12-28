@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nas-node-agent
+  namespace: nas-system
+spec:
+  selector:
+    matchLabels:
+      app: nas-node-agent
+  template:
+    metadata:
+      labels:
+        app: nas-node-agent
+    spec:
+      serviceAccountName: nas-node-agent
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: node-agent
+          image: localhost/nas-node-agent:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9808
+              hostPort: 9808
+          env:
+            - name: NODE_AGENT_AUTH_HEADER
+              value: "X-NAS-Node-Auth"
+            - name: NODE_AGENT_AUTH_VALUE
+              value: "dev-secret"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev
+              mountPath: /dev
+            - name: modules
+              mountPath: /lib/modules
+              readOnly: true
+            - name: run
+              mountPath: /run
+            - name: mnt
+              mountPath: /mnt
+      volumes:
+        - name: dev
+          hostPath: { path: /dev }
+        - name: modules
+          hostPath: { path: /lib/modules }
+        - name: run
+          hostPath: { path: /run }
+        - name: mnt
+          hostPath: { path: /mnt }

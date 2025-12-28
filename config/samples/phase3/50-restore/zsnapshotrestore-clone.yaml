@@ -1,0 +1,10 @@
+apiVersion: nas.io/v1alpha1
+kind: ZSnapshotRestore
+metadata:
+  name: home-restore-clone
+  namespace: nas-system
+spec:
+  nodeName: worker-1
+  sourceSnapshot: tank/home@GMT-2025.12.27-00.00.00
+  mode: clone
+  targetDataset: tank/home-restore-test

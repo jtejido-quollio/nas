@@ -1,0 +1,13 @@
+apiVersion: nas.io/v1alpha1
+kind: ZDataset
+metadata:
+  name: tank-home
+  namespace: nas-system
+spec:
+  nodeName: worker-1
+  datasetName: tank/home
+  properties:
+    mountpoint: /mnt/tank/home
+    compression: lz4
+    atime: "off"
+    snapdir: visible

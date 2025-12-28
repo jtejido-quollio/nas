@@ -1,0 +1,23 @@
+@startuml
+title ZSnapshotSchedule (Phase 3)
+
+participant "nas-operator" as OP
+participant "nas-node-agent" as NA
+database "ZFS" as ZFS
+
+OP -> OP : cron due?
+OP -> NA : SnapshotCreate(dataset@GMT-...)
+NA -> ZFS : zfs snapshot
+ZFS --> NA : ok
+NA --> OP : ok
+
+OP -> NA : SnapshotList(dataset)
+NA -> ZFS : zfs list -t snapshot
+ZFS --> NA : list
+NA --> OP : list
+
+OP -> NA : SnapshotDestroy(old snapshots)
+NA -> ZFS : zfs destroy
+ZFS --> NA : ok
+
+@enduml

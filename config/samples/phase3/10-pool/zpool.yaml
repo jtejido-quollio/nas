@@ -1,0 +1,13 @@
+apiVersion: nas.io/v1alpha1
+kind: ZPool
+metadata:
+  name: tank
+  namespace: nas-system
+spec:
+  nodeName: worker-1
+  poolName: tank
+  vdevs:
+    - type: mirror
+      devices:
+        - /dev/sdb
+        - /dev/sdc

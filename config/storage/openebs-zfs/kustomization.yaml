@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# OpenEBS ZFS LocalPV (CSI) – provides dynamic PV provisioning and VolumeSnapshots.
+# We intentionally reference the upstream rendered manifest to keep this repo lightweight.
+resources:
+  - https://raw.githubusercontent.com/openebs/zfs-localpv/master/deploy/zfs-operator.yaml
+  - storageclass.yaml
+  - volumesnapshotclass.yaml

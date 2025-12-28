@@ -1,0 +1,28 @@
+@startuml
+title SMBShare reconcile (Phase 3)
+
+actor Admin
+participant "K8s API" as API
+participant "nas-operator" as OP
+participant "nas-node-agent" as NA
+participant "Samba Pod" as Samba
+
+Admin -> API : apply SMBShare
+API -> OP : watch event
+
+OP -> NA : EnsureDataset(mountpoint, props)
+(if needed)
+NA -> NA : zfs create/set
+(mountpoint, snapdir, etc.)
+NA --> OP : OK
+
+OP -> API : create/update ConfigMap
+(smb.conf)
+OP -> API : create/update Deployment
+(Samba)
+OP -> API : create/update Service
+(NodePort)
+API -> Samba : start pod
+Samba --> OP : Ready
+
+@enduml

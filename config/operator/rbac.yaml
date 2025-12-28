@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nas-operator
+  namespace: nas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nas-operator
+rules:
+  # controller-runtime leader election uses Leases in coordination.k8s.io
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: [""]
+    resources: ["pods","services","endpoints","configmaps","secrets","nodes","persistentvolumeclaims","persistentvolumes"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments","daemonsets"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots","volumesnapshotcontents","volumesnapshotclasses"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["nas.io"]
+    resources: ["zpools","zdatasets","smbshares","zsnapshots","zsnapshotschedules","zsnapshotrestores"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["nas.io"]
+    resources: ["zpools/status","zdatasets/status","smbshares/status","zsnapshots/status","zsnapshotschedules/status","zsnapshotrestores/status"]
+    verbs: ["get","update","patch"]
+
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots","volumesnapshotclasses","volumesnapshotcontents"]
+    verbs: ["get","list","watch","create","update","patch","delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nas-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nas-operator
+subjects:
+  - kind: ServiceAccount
+    name: nas-operator
+    namespace: nas-system

@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nas-system
+
+resources:
+  - 10-pool/zpool.yaml
+  - 20-pvc/pvc.yaml
+  - 30-pod/writer-pod.yaml
+  - 40-snapshot/zsnapshot.yaml
+  - 50-restore/zsnapshotrestore.yaml
+  - 50-restore/reader-pod.yaml

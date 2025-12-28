@@ -1,0 +1,16 @@
+apiVersion: nas.io/v1alpha1
+kind: ZPool
+metadata:
+  name: test-pool
+spec:
+  # For minikube: the node is typically named "minikube".
+  # If yours differs: kubectl get nodes
+  nodeName: minikube
+  poolName: tank
+  # For a demo, use loopback files created by the node-agent (dev mode) or real block devices.
+  # Replace these with real devices like /dev/sdb when running on real Linux hardware.
+  vdevs:
+    - type: mirror
+      devices:
+        - /dev/loop10
+        - /dev/loop11

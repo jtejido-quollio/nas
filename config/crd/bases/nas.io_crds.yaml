@@ -1,0 +1,276 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zpools.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: ZPool
+    listKind: ZPoolList
+    plural: zpools
+    singular: zpool
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [nodeName, poolName, vdevs]
+              properties:
+                nodeName: {type: string}
+                poolName: {type: string}
+                vdevs:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, devices]
+                    properties:
+                      type: {type: string}
+                      devices:
+                        type: array
+                        items: {type: string}
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zdatasets.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: ZDataset
+    listKind: ZDatasetList
+    plural: zdatasets
+    singular: zdataset
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [nodeName, datasetName, properties]
+              properties:
+                nodeName: {type: string}
+                datasetName: {type: string}
+                properties:
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: smbshares.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: SMBShare
+    listKind: SMBShareList
+    plural: smbshares
+    singular: smbshare
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [nodeName, datasetName, mountPath, shareName, serviceType]
+              properties:
+                nodeName: {type: string}
+                # Phase2+: datasetName is the ZFS dataset path when Samba mounts from the host.
+                datasetName: {type: string}
+                # Phase2+ (preferred): pvcName is a CSI-backed volume; Samba mounts it as a Pod volume.
+                pvcName: {type: string}
+                mountPath: {type: string}
+                shareName: {type: string}
+                readOnly: {type: boolean}
+                serviceType: {type: string}
+                nodePort: {type: integer}
+                users:
+                  type: array
+                  items:
+                    type: object
+                    required: [username, passwordSecretRef]
+                    properties:
+                      username: {type: string}
+                      passwordSecretRef:
+                        type: object
+                        required: [name]
+                        properties:
+                          name: {type: string}
+                options:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+                endpoint: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zsnapshots.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: ZSnapshot
+    listKind: ZSnapshotList
+    plural: zsnapshots
+    singular: zsnapshot
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [pvcName]
+              properties:
+                pvcName: {type: string}
+                snapshotClassName: {type: string}
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+                volumeSnapshotName: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zsnapshotschedules.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: ZSnapshotSchedule
+    listKind: ZSnapshotScheduleList
+    plural: zsnapshotschedules
+    singular: zsnapshotschedule
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [nodeName, datasetName, schedule]
+              properties:
+                nodeName: {type: string}
+                datasetName: {type: string}
+                recursive: {type: boolean}
+                schedule: {type: string}
+                namePrefix: {type: string}
+                format: {type: string}
+                retention:
+                  type: object
+                  properties:
+                    keepLast: {type: integer}
+                    keepHourly: {type: integer}
+                    keepDaily: {type: integer}
+                    keepWeekly: {type: integer}
+                    keepMonthly: {type: integer}
+            status:
+              type: object
+              properties:
+                lastSnapshotName: {type: string}
+                lastRunTime: {type: string}
+                nextRunTime: {type: string}
+                message: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: zsnapshotrestores.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: ZSnapshotRestore
+    listKind: ZSnapshotRestoreList
+    plural: zsnapshotrestores
+    singular: zsnapshotrestore
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [mode]
+              properties:
+                # mode: "clone" (ZFS dataset clone via node-agent) OR "csi" (PVC restore from VolumeSnapshot)
+                mode: {type: string}
+
+                # clone mode
+                nodeName: {type: string}
+                sourceSnapshot: {type: string}
+                targetDataset: {type: string}
+                forceRollback: {type: boolean}
+                confirmationToken: {type: string}
+
+                # csi mode
+                sourceVolumeSnapshot: {type: string}
+                targetPVC: {type: string}
+                storageClassName: {type: string}
+                accessModes:
+                  type: array
+                  items: {type: string}
+                resources:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+                resultDataset: {type: string}
+                resultPVC: {type: string}
+      subresources:
+        status: {}

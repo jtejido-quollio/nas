@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nas-operator
+  namespace: nas-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nas-operator
+      nas.io/component: operator
+  template:
+    metadata:
+      labels:
+        app: nas-operator
+        nas.io/component: operator
+    spec:
+      serviceAccountName: nas-operator
+      containers:
+        - name: operator
+          image: localhost/nas-operator:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_AGENT_BASE_URL
+              value: "http://nas-node-agent.nas-system.svc.cluster.local:9808"
+            - name: NODE_AGENT_AUTH_HEADER
+              value: "X-NAS-Node-Auth"
+            - name: NODE_AGENT_AUTH_VALUE
+              value: "dev-secret"
+            - name: WATCH_NAMESPACE
+              value: ""

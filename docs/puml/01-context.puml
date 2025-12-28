@@ -1,0 +1,32 @@
+@startuml
+title nas-phase3 - Context (Phase 3)
+
+skinparam linetype ortho
+skinparam packageStyle rectangle
+hide stereotype
+
+actor "Admin / GitOps" as Admin
+actor "SMB Client
+(Windows/macOS)" as Client
+
+package "Kubernetes (Minikube)" {
+  [nas-operator] as Operator
+  [nas-node-agent
+(DaemonSet)] as Agent
+  [Samba Share Pod
+(per SMBShare)] as Samba
+  database "ZFS Pool/Datasets
+(on Node)" as ZFS
+}
+
+Admin --> Operator : apply CRDs
+(ZPool/ZDataset/SMBShare/...)
+Operator --> Agent : HTTP (authenticated)
+ZFS operations
+Agent --> ZFS : zpool/zfs
+Operator --> Samba : Deployments/Services
+ConfigMap(smb.conf)
+Secrets(users)
+Client --> Samba : SMB over NodePort
+
+@enduml

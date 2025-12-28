@@ -1,0 +1,15 @@
+apiVersion: nas.io/v1alpha1
+kind: ZSnapshotSchedule
+metadata:
+  name: home-every-2min
+  namespace: nas-system
+spec:
+  nodeName: worker-1
+  datasetName: tank/home
+  recursive: false
+  schedule: "*/2 * * * *"
+  namePrefix: "GMT"
+  format: "%Y.%m.%d-%H.%M.%S"
+  retention:
+    keepLast: 10
+    keepHourly: 6

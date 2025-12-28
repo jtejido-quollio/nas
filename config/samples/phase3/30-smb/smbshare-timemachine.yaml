@@ -1,0 +1,28 @@
+apiVersion: nas.io/v1alpha1
+kind: SMBShare
+metadata:
+  name: timemachine-share
+  namespace: nas-system
+spec:
+  nodeName: worker-1
+  datasetName: tank/timemachine
+  mountPath: /mnt/tank/timemachine
+  shareName: timemachine
+  readOnly: false
+  serviceType: NodePort
+  nodePort: 31445
+  users:
+    - username: alice
+      passwordSecretRef:
+        name: smb-user-alice
+  options:
+    macosCompat: true
+    encryption: desired
+    browseable: true
+    guestOk: false
+    validUsers: ["alice"]
+    writeList: ["alice"]
+    timeMachine:
+      enabled: true
+      advertiseAsTimeMachine: true
+      volumeSizeLimitBytes: 1099511627776

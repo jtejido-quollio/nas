@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smb-user-alice
+  namespace: nas-system
+type: Opaque
+stringData:
+  password: "ChangeMe123!"

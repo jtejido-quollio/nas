@@ -1,0 +1,7 @@
+apiVersion: nas.io/v1alpha1
+kind: ZSnapshot
+metadata:
+  name: demo-snap
+spec:
+  pvcName: demo-pvc
+  snapshotClassName: nas-zfspv-snapclass
