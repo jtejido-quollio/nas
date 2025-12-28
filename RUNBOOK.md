@@ -1,10 +1,10 @@
-# RUNBOOK (Mac + Podman + k3s on Linux VM)
+# RUNBOOK (Mac + Docker/Podman + k3s on Linux VM)
 
 This runbook assumes k3s is already running on a **Linux VM** because ZFS
 operations must run on Linux.
 
 ## 0) Prereqs on Mac
-- Podman Desktop installed (optional if you build inside the VM)
+- Docker Desktop or Podman Desktop installed (optional if you build inside the VM)
 - `kubectl` and `kustomize` on your Mac (optional if you run everything in the VM)
 - A Linux VM (Ubuntu 22.04/24.04 is fine) with:
   - ZFS installed (`zfsutils-linux`)
@@ -57,6 +57,13 @@ make K3S_CTR="sudo k3s ctr" load-images
 `make load-images` saves the images and imports them into k3s containerd.
 If you already have another local registry/runtime, load images there instead.
 
+If your VM is ARM64 (Apple Silicon/UTM), build with:
+```bash
+make PLATFORM=linux/arm64 images
+```
+
+Phase 0 validation (node-agent API only) is documented in `config/samples/phase0/README.md`.
+
 ## 5) Update sample node/device values
 Before deploying, update `nodeName` and device paths to match your VM:
 ```bash
@@ -65,13 +72,13 @@ kubectl get nodes -o wide
 
 Files to edit (anything with `nodeName`):
 - `config/samples/phase1/10-pool/zpool.yaml`
-- `config/samples/phase3/10-pool/zpool.yaml`
-- `config/samples/phase3/20-dataset/zdataset-home.yaml`
-- `config/samples/phase3/20-dataset/zdataset-timemachine.yaml`
-- `config/samples/phase3/30-smb/smbshare-home.yaml`
-- `config/samples/phase3/30-smb/smbshare-timemachine.yaml`
-- `config/samples/phase3/40-snapshots/zsnapshotschedule-home.yaml`
-- `config/samples/phase3/50-restore/zsnapshotrestore-clone.yaml`
+- `config/samples/phase2/10-pool/zpool.yaml`
+- `config/samples/phase2/20-dataset/zdataset-home.yaml`
+- `config/samples/phase2/20-dataset/zdataset-timemachine.yaml`
+- `config/samples/phase2/30-smb/smbshare-home.yaml`
+- `config/samples/phase2/30-smb/smbshare-timemachine.yaml`
+- `config/samples/phase2/40-snapshots/zsnapshotschedule-home.yaml`
+- `config/samples/phase2/50-restore/zsnapshotrestore-clone.yaml`
 
 ## 6) Deploy Phase 1 (Storage MVP)
 Phase 1 includes:
@@ -96,9 +103,9 @@ Wait until:
 * the VolumeSnapshot is ReadyToUse
 * the restore PVC is Bound
 
-## 7) Deploy Phase 3 (optional)
+## 7) Deploy Phase 2 (optional)
 ```bash
-make deploy-phase3
+make deploy-phase2
 ```
 
 ## 8) Verify resources
@@ -119,7 +126,7 @@ On macOS Finder:
 - Go → Connect to Server
 - `smb://<VM-IP>:30445`
 
-Username/password are from `config/samples/phase3/00-secrets/smb-user-alice.yaml`.
+Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml`.
 
 ## 10) Validate snapshots and Previous Versions
 - Create a file in the SMB share
@@ -132,23 +139,22 @@ Username/password are from `config/samples/phase3/00-secrets/smb-user-alice.yaml
 ```bash
 sudo zfs list -t snapshot -o name -r tank/home | head
 ```
-2. Edit `config/samples/phase3/50-restore/zsnapshotrestore-clone.yaml` to point to a real snapshot name.
+2. Edit `config/samples/phase2/50-restore/zsnapshotrestore-clone.yaml` to point to a real snapshot name.
 3. Apply:
 ```bash
-kubectl apply -k config/samples/phase3
+kubectl apply -k config/samples/phase2
 kubectl -n nas-system describe zsnapshotrestore home-restore-clone
 ```
 
 ## 12) Cleanup
 ```bash
-make cleanup-phase3
+make cleanup-phase2
 ```
 
 ## Notes / gotchas
-### Why you typically need Linux (even if you run Minikube on macOS)
+### Why you typically need Linux (even if you run kubectl from macOS)
 ZFS, SMART, and raw block device management require Linux kernel capabilities and privileged device access.
-When you run Minikube on macOS (Docker/Podman driver), Kubernetes nodes are Linux VMs hidden behind the driver.
-You can run the control plane on macOS, but the ZFS work still happens in that Linux VM.
+You can run kubectl from macOS, but the ZFS work still happens in the Linux VM.
 
 ### OpenEBS manifest fetch
 `config/storage/openebs-zfs` references an upstream manifest via URL. Your cluster machine needs outbound internet (or you can vendor the YAML later).

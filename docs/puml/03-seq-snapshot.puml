@@ -1,5 +1,5 @@
 @startuml
-title ZSnapshotSchedule (Phase 3)
+title ZSnapshotSchedule (Phase 2)
 
 participant "nas-operator" as OP
 participant "nas-node-agent" as NA

@@ -17,7 +17,7 @@ IMG_OPERATOR ?= localhost/nas-operator:dev
 .PHONY: fmt tidy build images save-images load-images \
   deploy-crds deploy-node-agent deploy-operator deploy-storage \
   deploy-phase1 phase1-smoke cleanup-phase1 \
-  deploy-phase3 phase3-smoke cleanup-phase3
+  deploy-phase2 phase2-smoke cleanup-phase2
 
 fmt:
 	gofmt -w .
@@ -98,12 +98,12 @@ cleanup-phase1:
 	@echo "Cleanup complete."
 	@echo "Phase1 sample cleanup complete."
 
-deploy-phase3: deploy-crds deploy-node-agent deploy-operator
-	$(KUBECTL) apply -k config/samples/phase3
-	@echo "Phase3 resources applied."
-	@$(MAKE) phase3-smoke
+deploy-phase2: deploy-crds deploy-node-agent deploy-operator
+	$(KUBECTL) apply -k config/samples/phase2
+	@echo "Phase2 resources applied."
+	@$(MAKE) phase2-smoke
 
-phase3-smoke:
+phase2-smoke:
 	@echo "== Waiting for namespace $(NAMESPACE) =="
 	$(KUBECTL) get ns $(NAMESPACE) >/dev/null 2>&1 || (echo "Namespace missing"; exit 1)
 
@@ -128,8 +128,8 @@ phase3-smoke:
 	@echo "  home:       30445"
 	@echo "  timemachine:31445"
 
-cleanup-phase3:
-	-$(KUBECTL) delete -k config/samples/phase3 --ignore-not-found=true
+cleanup-phase2:
+	-$(KUBECTL) delete -k config/samples/phase2 --ignore-not-found=true
 	-$(KUBECTL) delete -k config/operator --ignore-not-found=true
 	-$(KUBECTL) delete -k config/node-agent --ignore-not-found=true
 	-$(KUBECTL) delete -k config/crd --ignore-not-found=true

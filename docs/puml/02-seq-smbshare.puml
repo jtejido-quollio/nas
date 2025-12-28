@@ -1,5 +1,5 @@
 @startuml
-title SMBShare reconcile (Phase 3)
+title SMBShare reconcile (Phase 2)
 
 actor Admin
 participant "K8s API" as API

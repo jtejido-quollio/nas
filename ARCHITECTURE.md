@@ -1,7 +1,7 @@
-# Architecture (Phase 3)
+# Architecture (Phase 2)
 
 ## Scope boundary
-Phase 3 is intentionally constrained to a single-node-friendly, end-to-end experience:
+Phase 2 is intentionally constrained to a single-node-friendly, end-to-end experience:
 
 - ZFS pool + datasets
 - SMB shares
@@ -63,4 +63,3 @@ Save as `docs/puml/01-context.puml` (already included in repo).
 - Reconciliation is idempotent:
   - Reapplying manifests should converge to same state.
 - The system is designed to be easy to reset and redeploy.
-

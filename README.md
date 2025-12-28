@@ -7,7 +7,7 @@ It now includes **Phase 1 (Storage MVP)** end-to-end:
 - Dynamic PVC provisioning via **OpenEBS ZFS LocalPV CSI**
 - VolumeSnapshots via CSI (ZSnapshot) and restore to a new PVC (ZSnapshotRestore mode=csi)
 
-Phase 3 SMB samples remain included for later, but Phase 1 is the recommended first run.
+Phase 2 SMB samples are included, but Phase 1 is the recommended first run.
 
 ## What this is
 A small “control plane” that lets you declare storage and SMB services using CRDs:
@@ -33,7 +33,7 @@ This system is **GitOps + Kubernetes-style**:
 - Teams experimenting with “NAS as a Kubernetes workload”
 - Engineers who want a minimal, auditable control plane (no monolithic UI)
 
-## Use cases (Phase 3)
+## Use cases (Phase 2)
 - SMB file share for Windows/macOS clients
 - Windows “Previous Versions” via ZFS snapshots + `shadow_copy2`
 - macOS Time Machine target over SMB
@@ -48,16 +48,16 @@ This system is **GitOps + Kubernetes-style**:
 - Multi-tenant isolation
 
 ## Architecture and diagrams
-See **ARCHITECTURE.md** for component diagrams, sequence flows, and the Phase 3 boundary.
+See **ARCHITECTURE.md** for component diagrams, sequence flows, and the Phase 2 boundary.
 
 ## How to run
-See **RUNBOOK.md** for a step-by-step Mac + Podman + Minikube-on-Linux-VM guide.
+See **RUNBOOK.md** for a step-by-step Mac + Docker/Podman + k3s-on-Linux-VM guide.
 
 Quick start (inside your Linux VM / Linux host):
 ```bash
 make tidy
 make build
 make images
-make load-images
+make K3S_CTR="sudo k3s ctr" load-images
 make deploy-phase1
 ```
