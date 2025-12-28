@@ -72,7 +72,7 @@ func (r *ZSnapshotScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if due {
 		snapName := fmt.Sprintf("%s-%s", prefix, now.Format(strftimeToGo(format)))
 		full := fmt.Sprintf("%s@%s", ds, snapName)
-		body := map[string]any{"fullName": full, "recursive": spec.Recursive}
+		body := map[string]any{"dataset": ds, "name": snapName, "recursive": spec.Recursive}
 		var out any
 		if err := na.do(ctx, "POST", "/v1/zfs/snapshot/create", body, &out, nil); err != nil {
 			obj.Status.Message = err.Error()
@@ -106,7 +106,7 @@ func (r *ZSnapshotScheduleReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			if int64(len(managed)) > keepLast {
 				toDelete := managed[:int64(len(managed))-keepLast]
 				for _, s := range toDelete {
-					_ = na.do(ctx, "POST", "/v1/zfs/snapshot/destroy", map[string]any{"fullName": s}, &out, nil)
+					_ = na.do(ctx, "POST", "/v1/zfs/snapshot/destroy", map[string]any{"snapshot": s}, &out, nil)
 				}
 			}
 		}

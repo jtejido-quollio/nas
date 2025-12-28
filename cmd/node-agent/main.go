@@ -110,12 +110,19 @@ type ZPoolDestroyRequest struct {
 }
 
 type ZSnapshotCreateRequest struct {
-	Dataset string `json:"dataset"`
-	Name    string `json:"name"`
+	Dataset   string `json:"dataset"`
+	Name      string `json:"name"`
+	Recursive bool   `json:"recursive,omitempty"`
 }
 
 type ZSnapshotDestroyRequest struct {
 	Snapshot string `json:"snapshot"`
+}
+
+type ZSnapshotListResponse struct {
+	OK    bool     `json:"ok"`
+	Error string   `json:"error,omitempty"`
+	Items []string `json:"items,omitempty"`
 }
 
 // -----------------
@@ -330,6 +337,21 @@ func main() {
 	})
 
 	// ----- Snapshots -----
+	mux.HandleFunc("/v1/zfs/snapshot/list", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ds := strings.TrimSpace(r.URL.Query().Get("dataset"))
+		items, out, err := listSnapshotNames(ds)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ZSnapshotListResponse{OK: false, Error: err.Error()})
+			return
+		}
+		_ = out
+		writeJSON(w, http.StatusOK, ZSnapshotListResponse{OK: true, Items: items})
+	})
+
 	mux.HandleFunc("/v1/zfs/snapshot/create", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -345,7 +367,12 @@ func main() {
 			return
 		}
 		snap := strings.TrimSpace(req.Dataset) + "@" + strings.TrimSpace(req.Name)
-		out, err := runCmdCombined(r.Context(), 120*time.Second, "zfs", "snapshot", snap)
+		args := []string{"snapshot"}
+		if req.Recursive {
+			args = append(args, "-r")
+		}
+		args = append(args, snap)
+		out, err := runCmdCombined(r.Context(), 120*time.Second, "zfs", args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZPoolOpResponse{OK: false, Output: out, Error: err.Error()})
 			return
@@ -593,6 +620,18 @@ func listZPoolNames() ([]string, string, error) {
 	out, err := runCmdCombined(context.Background(), 30*time.Second, "zpool", "list", "-H", "-o", "name")
 	if err != nil {
 		return nil, out, fmt.Errorf("zpool list failed: %w", err)
+	}
+	return splitLines(out), out, nil
+}
+
+func listSnapshotNames(dataset string) ([]string, string, error) {
+	args := []string{"list", "-H", "-t", "snapshot", "-o", "name"}
+	if dataset != "" {
+		args = append(args, "-r", dataset)
+	}
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", args...)
+	if err != nil {
+		return nil, out, fmt.Errorf("zfs snapshot list failed: %w", err)
 	}
 	return splitLines(out), out, nil
 }
