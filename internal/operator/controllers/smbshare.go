@@ -201,7 +201,8 @@ func (r *SMBShareReconciler) buildUserScript(ctx context.Context, ns string, use
 		enc := base64.StdEncoding.EncodeToString([]byte(pw))
 		lines = append(lines,
 			fmt.Sprintf("id -u %s >/dev/null 2>&1 || adduser -D %s", username, username),
-			fmt.Sprintf("echo %s | base64 -d | (smbpasswd -a -s %s)", enc, username),
+			fmt.Sprintf("pw=$(echo %s | base64 -d)", enc),
+			fmt.Sprintf("printf '%%s\\n%%s\\n' \"$pw\" \"$pw\" | smbpasswd -a -s %s", username),
 		)
 	}
 	return strings.Join(lines, "\n") + "\n", nil
