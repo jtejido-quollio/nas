@@ -6,7 +6,7 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download || true
 COPY . .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/node-agent ./cmd/node-agent
+RUN CGO_ENABLED=0 go build -o /out/node-agent ./cmd/node-agent
 
 FROM debian:12-slim
 RUN set -eux; \

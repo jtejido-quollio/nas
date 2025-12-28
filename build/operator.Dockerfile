@@ -6,7 +6,7 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download || true
 COPY . .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/operator ./cmd/operator
+RUN CGO_ENABLED=0 go build -o /out/operator ./cmd/operator
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/operator /operator
