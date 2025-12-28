@@ -46,6 +46,7 @@ load-images: save-images
 
 deploy-phase0: deploy-node-agent
 	@echo "Phase0 resources applied."
+	@$(MAKE) phase0-smoke
 
 phase0-smoke:
 	@echo "== Node-agent health =="
