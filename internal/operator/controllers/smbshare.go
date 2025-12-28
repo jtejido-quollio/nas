@@ -103,7 +103,7 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 							},
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{
-								"chmod +x /etc/smb/users.sh && /etc/smb/users.sh && exec samba -FS --no-process-group -s /etc/smb/smb.conf",
+								"sh /etc/smb/users.sh && exec samba -FS --no-process-group -s /etc/smb/smb.conf",
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "conf", MountPath: "/etc/smb"},
