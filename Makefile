@@ -3,12 +3,16 @@ SHELL := /bin/bash
 KUBECTL ?= kubectl
 KUSTOMIZE ?= kustomize
 PODMAN ?= podman
+K3S_CTR ?= k3s ctr
+IMAGE_TAR_DIR ?= /tmp
+NODE_AGENT_TAR ?= $(IMAGE_TAR_DIR)/nas-node-agent.tar
+OPERATOR_TAR ?= $(IMAGE_TAR_DIR)/nas-operator.tar
 
 NAMESPACE ?= nas-system
 IMG_NODE_AGENT ?= localhost/nas-node-agent:dev
 IMG_OPERATOR ?= localhost/nas-operator:dev
 
-.PHONY: fmt tidy build images load-images \
+.PHONY: fmt tidy build images save-images load-images \
   deploy-crds deploy-node-agent deploy-operator deploy-storage \
   deploy-phase1 phase1-smoke cleanup-phase1 \
   deploy-phase3 phase3-smoke cleanup-phase3
@@ -27,9 +31,13 @@ images:
 	$(PODMAN) build -f build/node-agent.Dockerfile -t $(IMG_NODE_AGENT) .
 	$(PODMAN) build -f build/operator.Dockerfile -t $(IMG_OPERATOR) .
 
-load-images:
-	minikube image load $(IMG_NODE_AGENT)
-	minikube image load $(IMG_OPERATOR)
+save-images:
+	$(PODMAN) save --format docker-archive -o $(NODE_AGENT_TAR) $(IMG_NODE_AGENT)
+	$(PODMAN) save --format docker-archive -o $(OPERATOR_TAR) $(IMG_OPERATOR)
+
+load-images: save-images
+	$(K3S_CTR) images import $(NODE_AGENT_TAR)
+	$(K3S_CTR) images import $(OPERATOR_TAR)
 
 deploy-crds:
 	$(KUBECTL) apply -k config/crd

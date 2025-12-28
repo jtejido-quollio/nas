@@ -1,11 +1,11 @@
-# RUNBOOK (Mac + Podman + Minikube on Linux VM)
+# RUNBOOK (Mac + Podman + k3s on Linux VM)
 
-This runbook assumes you selected **Option A**:
-Minikube runs inside a **Linux VM**, because ZFS operations must run on Linux.
+This runbook assumes k3s is already running on a **Linux VM** because ZFS
+operations must run on Linux.
 
 ## 0) Prereqs on Mac
-- Podman Desktop installed (for building images)
-- `kubectl`, `minikube`, `kustomize` on your Mac
+- Podman Desktop installed (optional if you build inside the VM)
+- `kubectl` and `kustomize` on your Mac (optional if you run everything in the VM)
 - A Linux VM (Ubuntu 22.04/24.04 is fine) with:
   - ZFS installed (`zfsutils-linux`)
   - Two extra disks attached for a pool OR a single disk for a test pool
@@ -22,12 +22,21 @@ sudo apt-get install -y curl git make
 sudo apt-get install -y zfsutils-linux
 ```
 
-Install kubectl/minikube (VM side) OR run minikube from Mac targeting the VM. The simplest is to run everything in the VM.
-
-## 2) Start Minikube in the VM (recommended)
+If `kubectl` is not installed on the VM, k3s bundles it:
 ```bash
-minikube start --cpus=4 --memory=8192 --disk-size=80g
-minikube addons enable ingress
+sudo k3s kubectl get nodes
+```
+
+To keep using `kubectl` in commands below, either install `kubectl` or run:
+```bash
+export KUBECTL="sudo k3s kubectl"
+alias kubectl="sudo k3s kubectl"
+```
+
+## 2) Verify k3s is running
+```bash
+kubectl get nodes
+kubectl get pods -A | head
 ```
 
 ## 3) Get the project onto the VM
@@ -42,12 +51,29 @@ Inside the VM:
 make tidy
 make build
 make images
-make load-images
+make K3S_CTR="sudo k3s ctr" load-images
 ```
 
-If `minikube image load` is not available in your setup, use your container runtime accordingly.
+`make load-images` saves the images and imports them into k3s containerd.
+If you already have another local registry/runtime, load images there instead.
 
-## 5) Deploy Phase 1 (Storage MVP)
+## 5) Update sample node/device values
+Before deploying, update `nodeName` and device paths to match your VM:
+```bash
+kubectl get nodes -o wide
+```
+
+Files to edit (anything with `nodeName`):
+- `config/samples/phase1/10-pool/zpool.yaml`
+- `config/samples/phase3/10-pool/zpool.yaml`
+- `config/samples/phase3/20-dataset/zdataset-home.yaml`
+- `config/samples/phase3/20-dataset/zdataset-timemachine.yaml`
+- `config/samples/phase3/30-smb/smbshare-home.yaml`
+- `config/samples/phase3/30-smb/smbshare-timemachine.yaml`
+- `config/samples/phase3/40-snapshots/zsnapshotschedule-home.yaml`
+- `config/samples/phase3/50-restore/zsnapshotrestore-clone.yaml`
+
+## 6) Deploy Phase 1 (Storage MVP)
 Phase 1 includes:
 * nas-node-agent + nas-operator
 * OpenEBS ZFS LocalPV (CSI) for dynamic PVC provisioning
@@ -70,19 +96,19 @@ Wait until:
 * the VolumeSnapshot is ReadyToUse
 * the restore PVC is Bound
 
-## 6) Deploy Phase 3 (optional)
+## 7) Deploy Phase 3 (optional)
 ```bash
 make deploy-phase3
 ```
 
-## 6) Verify resources
+## 8) Verify resources
 ```bash
 kubectl -n nas-system get pods -o wide
 kubectl -n nas-system get svc -o wide
 kubectl -n nas-system get zpool,zdataset,smbshare,zsnapshotschedule
 ```
 
-## 7) Connect from your Mac (SMB)
+## 9) Connect from your Mac (SMB)
 Find the VM's IP address:
 ```bash
 ip a
@@ -95,13 +121,13 @@ On macOS Finder:
 
 Username/password are from `config/samples/phase3/00-secrets/smb-user-alice.yaml`.
 
-## 8) Validate snapshots and Previous Versions
+## 10) Validate snapshots and Previous Versions
 - Create a file in the SMB share
 - Wait 2–4 minutes (sample schedule is every 2 minutes)
 - Modify/delete the file
 - On Windows: right-click → Properties → Previous Versions
 
-## 9) Restore by clone
+## 11) Restore by clone
 1. List snapshots from ZFS (inside node):
 ```bash
 sudo zfs list -t snapshot -o name -r tank/home | head
@@ -113,7 +139,7 @@ kubectl apply -k config/samples/phase3
 kubectl -n nas-system describe zsnapshotrestore home-restore-clone
 ```
 
-## 10) Cleanup
+## 12) Cleanup
 ```bash
 make cleanup-phase3
 ```
@@ -131,4 +157,3 @@ You can run the control plane on macOS, but the ZFS work still happens in that L
 node-agent runs privileged and uses host mounts. This is expected.
 - NetworkPolicy enforcement depends on your CNI.
 - NodePort is for lab testing; production would use a different ingress/exposure model.
-
