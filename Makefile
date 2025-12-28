@@ -7,6 +7,7 @@ K3S_CTR ?= k3s ctr
 IMAGE_TAR_DIR ?= /tmp
 NODE_AGENT_TAR ?= $(IMAGE_TAR_DIR)/nas-node-agent.tar
 OPERATOR_TAR ?= $(IMAGE_TAR_DIR)/nas-operator.tar
+OPENEBS_ZFS_MANIFEST ?= https://raw.githubusercontent.com/openebs/zfs-localpv/master/deploy/zfs-operator.yaml
 
 NAMESPACE ?= nas-system
 IMG_NODE_AGENT ?= localhost/nas-node-agent:dev
@@ -49,7 +50,14 @@ deploy-operator:
 	$(KUBECTL) apply -k config/operator
 
 deploy-storage:
-	$(KUBECTL) apply -k config/storage
+	$(KUBECTL) apply -f $(OPENEBS_ZFS_MANIFEST)
+	$(KUBECTL) apply -f config/storage/openebs-zfs/storageclass.yaml
+	$(KUBECTL) wait --for=condition=Established \
+		crd/volumesnapshotclasses.snapshot.storage.k8s.io \
+		crd/volumesnapshotcontents.snapshot.storage.k8s.io \
+		crd/volumesnapshots.snapshot.storage.k8s.io \
+		--timeout=120s
+	$(KUBECTL) apply -f config/storage/openebs-zfs/volumesnapshotclass.yaml
 
 deploy-phase1: deploy-crds deploy-node-agent deploy-operator deploy-storage
 	$(KUBECTL) apply -k config/samples/phase1
