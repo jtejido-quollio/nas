@@ -114,34 +114,33 @@ func Render(shareName, path string, readOnly bool, o Options) (string, error) {
 		vfsLine = fmt.Sprintf("  vfs objects = %s", strings.Join(vfs, " "))
 	}
 
-	var fruitLines string
-	if slices.Contains(vfs, "fruit") {
-		fruitLines = "" + "  fruit:metadata = stream" + "  fruit:resource = xattr" + "  fruit:posix_rename = yes"
-	}
-
-	var shadowLines string
+	var shadowLines []string
 	if o.SnapshotExposure != nil && o.SnapshotExposure.Enabled {
 		localTime := "yes"
 		if o.SnapshotExposure.LocalTime != nil && !*o.SnapshotExposure.LocalTime {
 			localTime = "no"
 		}
-		shadowLines = "  shadow:snapdir = .zfs/snapshot" +
-			fmt.Sprintf("  shadow:format = %s", o.SnapshotExposure.Format) + "  shadow:localtime = " + localTime + " shadow:sort = desc"
+		shadowLines = []string{
+			"  shadow:snapdir = .zfs/snapshot",
+			fmt.Sprintf("  shadow:format = %s", o.SnapshotExposure.Format),
+			fmt.Sprintf("  shadow:localtime = %s", localTime),
+			"  shadow:sort = desc",
+		}
 	}
 
-	var tmLines string
+	var tmLines []string
 	if o.TimeMachine != nil && o.TimeMachine.Enabled {
 		adv := true
 		if o.TimeMachine.AdvertiseAsTimeMachine != nil {
 			adv = *o.TimeMachine.AdvertiseAsTimeMachine
 		}
 		if adv {
-			tmLines += "  fruit:time machine = yes"
+			tmLines = append(tmLines, "  fruit:time machine = yes")
 		}
 		if o.TimeMachine.VolumeSizeLimitBytes != nil {
-			tmLines += fmt.Sprintf("  fruit:time machine max size = %d", *o.TimeMachine.VolumeSizeLimitBytes)
+			tmLines = append(tmLines, fmt.Sprintf("  fruit:time machine max size = %d", *o.TimeMachine.VolumeSizeLimitBytes))
 		}
-		tmLines += "  ea support = yes inherit acls = yes"
+		tmLines = append(tmLines, "  ea support = yes", "  inherit acls = yes")
 	}
 
 	encLine := ""
@@ -156,46 +155,47 @@ func Render(shareName, path string, readOnly bool, o Options) (string, error) {
 		}
 	}
 
-	validUsers := ""
-	if len(o.ValidUsers) > 0 {
-		validUsers = fmt.Sprintf("  valid users = %s", strings.Join(o.ValidUsers, " "))
-	}
-	writeList := ""
-	if len(o.WriteList) > 0 {
-		writeList = fmt.Sprintf("  write list = %s", strings.Join(o.WriteList, " "))
+	shareLines := []string{
+		fmt.Sprintf("[%s]", shareName),
+		fmt.Sprintf("  path = %s", path),
+		fmt.Sprintf("  browseable = %s", browseable),
+		fmt.Sprintf("  guest ok = %s", guestOk),
+		fmt.Sprintf("  read only = %s", yesno(readOnly)),
+		fmt.Sprintf("  create mask = %s", createMask),
+		fmt.Sprintf("  directory mask = %s", dirMask),
 	}
 
-	inheritPerms := ""
 	if o.InheritPerms != nil {
-		inheritPerms = fmt.Sprintf("  inherit permissions = %s", yesno(*o.InheritPerms))
+		shareLines = append(shareLines, fmt.Sprintf("  inherit permissions = %s", yesno(*o.InheritPerms)))
+	}
+	if vfsLine != "" {
+		shareLines = append(shareLines, vfsLine)
+	}
+	if slices.Contains(vfs, "fruit") {
+		shareLines = append(shareLines,
+			"  fruit:metadata = stream",
+			"  fruit:resource = xattr",
+			"  fruit:posix_rename = yes",
+		)
+	}
+	if len(shadowLines) > 0 {
+		shareLines = append(shareLines, shadowLines...)
+	}
+	if len(tmLines) > 0 {
+		shareLines = append(shareLines, tmLines...)
+	}
+	if encLine != "" {
+		shareLines = append(shareLines, encLine)
+	}
+	if len(o.ValidUsers) > 0 {
+		shareLines = append(shareLines, fmt.Sprintf("  valid users = %s", strings.Join(o.ValidUsers, " ")))
+	}
+	if len(o.WriteList) > 0 {
+		shareLines = append(shareLines, fmt.Sprintf("  write list = %s", strings.Join(o.WriteList, " ")))
 	}
 
-	share := fmt.Sprintf(`
-[%s]
-  path = %s
-  browseable = %s
-  guest ok = %s
-  read only = %s
-  create mask = %s
-  directory mask = %s
-%s%s%s%s%s%s%s%s`,
-		shareName,
-		path,
-		browseable,
-		guestOk,
-		yesno(readOnly),
-		createMask,
-		dirMask,
-		inheritPerms,
-		vfsLine,
-		fruitLines,
-		shadowLines,
-		tmLines,
-		encLine,
-		validUsers,
-		writeList,
-	)
-	return global + share, nil
+	share := strings.Join(shareLines, "\n") + "\n"
+	return global + "\n" + share, nil
 }
 
 func uniqStable(in []string) []string {
