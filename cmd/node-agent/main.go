@@ -77,7 +77,7 @@ var diskCache struct {
 
 var diskRefreshCh = make(chan struct{}, 1)
 
-const nfsExportsPath = "/etc/exports.d/nas-exports"
+const nfsExportsPath = "/etc/exports.d/nas.exports"
 
 // Legacy pool create (kept for backward compatibility)
 type ZPoolCreateRequest struct {

@@ -30,7 +30,7 @@ ${KUBECTL_BIN} -n "${NAMESPACE}" get zpool,zdataset,nasshare,nasuser,nasgroup,zs
 log "NFS exports (node-agent)"
 node_agent_pod="$(${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app=nas-node-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 if [[ -n "$node_agent_pod" ]]; then
-  ${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- cat /etc/exports.d/nas-exports 2>/dev/null || echo "(no exports file yet)"
+  ${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- cat /etc/exports.d/nas.exports 2>/dev/null || echo "(no exports file yet)"
 else
   echo "(node-agent pod not found)"
 fi

@@ -51,7 +51,7 @@ Save as `docs/puml/01-context.puml` (already included in repo).
 ### 3) Expose NFS export
 1. Apply `NASShare` with `protocol: nfs`
 2. Operator ensures dataset mounted
-3. Node-agent writes `/etc/exports.d/nas-exports` + runs `exportfs -ra`
+3. Node-agent writes `/etc/exports.d/nas.exports` + runs `exportfs -ra`
 4. Clients mount via NFS.
 
 ### 4) Snapshots + Previous Versions
