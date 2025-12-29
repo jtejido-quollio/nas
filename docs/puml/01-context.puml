@@ -14,13 +14,13 @@ package "Kubernetes (Minikube)" {
   [nas-node-agent
 (DaemonSet)] as Agent
   [Samba Share Pod
-(per SMBShare)] as Samba
+(per NASShare)] as Samba
   database "ZFS Pool/Datasets
 (on Node)" as ZFS
 }
 
 Admin --> Operator : apply CRDs
-(ZPool/ZDataset/SMBShare/...)
+(ZPool/ZDataset/NASShare/...)
 Operator --> Agent : HTTP (authenticated)
 ZFS operations
 Agent --> ZFS : zpool/zfs

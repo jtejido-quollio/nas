@@ -19,7 +19,6 @@ A small “control plane” that lets you declare storage and SMB services using
 - **ZSnapshotRestore** — restore from a CSI VolumeSnapshot to a new PVC (mode=csi) or clone a ZFS dataset snapshot (mode=clone)
 - **NASShare** — SMB or NFS share backed by ZFS datasets or CSI PVCs
 - **NASUser/NASGroup** — local share users and groups (secrets-backed)
-- **SMBShare** — legacy SMB CRD (still supported)
 
 ## Why we built it (vs TrueNAS/FreeNAS)
 Traditional NAS OSes are **appliance-style**: one box, one UI, imperative configuration.

@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // ZSnapshotRestoreSpec defines the desired state of ZSnapshotRestore.
@@ -48,6 +49,89 @@ type ZSnapshotRestoreList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ZSnapshotRestore `json:"items"`
+}
+
+func (in *ZSnapshotRestoreSpec) DeepCopyInto(out *ZSnapshotRestoreSpec) {
+	*out = *in
+	if in.AccessModes != nil {
+		out.AccessModes = make([]string, len(in.AccessModes))
+		copy(out.AccessModes, in.AccessModes)
+	}
+	if in.Resources != nil {
+		out.Resources = runtime.DeepCopyJSON(in.Resources)
+	}
+}
+
+func (in *ZSnapshotRestoreSpec) DeepCopy() *ZSnapshotRestoreSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ZSnapshotRestoreSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ZSnapshotRestoreStatus) DeepCopyInto(out *ZSnapshotRestoreStatus) { *out = *in }
+
+func (in *ZSnapshotRestoreStatus) DeepCopy() *ZSnapshotRestoreStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(ZSnapshotRestoreStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ZSnapshotRestore) DeepCopyInto(out *ZSnapshotRestore) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *ZSnapshotRestore) DeepCopy() *ZSnapshotRestore {
+	if in == nil {
+		return nil
+	}
+	out := new(ZSnapshotRestore)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ZSnapshotRestore) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ZSnapshotRestoreList) DeepCopyInto(out *ZSnapshotRestoreList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		out.Items = make([]ZSnapshotRestore, len(in.Items))
+		for i := range in.Items {
+			in.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+func (in *ZSnapshotRestoreList) DeepCopy() *ZSnapshotRestoreList {
+	if in == nil {
+		return nil
+	}
+	out := new(ZSnapshotRestoreList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ZSnapshotRestoreList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
 }
 
 func init() {

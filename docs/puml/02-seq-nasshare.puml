@@ -1,5 +1,5 @@
 @startuml
-title SMBShare reconcile (Phase 2)
+title NASShare reconcile (Phase 2)
 
 actor Admin
 participant "K8s API" as API
@@ -7,7 +7,7 @@ participant "nas-operator" as OP
 participant "nas-node-agent" as NA
 participant "Samba Pod" as Samba
 
-Admin -> API : apply SMBShare
+Admin -> API : apply NASShare
 API -> OP : watch event
 
 OP -> NA : EnsureDataset(mountpoint, props)

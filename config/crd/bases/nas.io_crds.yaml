@@ -83,64 +83,6 @@ spec:
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: smbshares.nas.io
-spec:
-  group: nas.io
-  names:
-    kind: SMBShare
-    listKind: SMBShareList
-    plural: smbshares
-    singular: smbshare
-  scope: Namespaced
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              required: [mountPath, shareName, serviceType]
-              properties:
-                nodeName: {type: string}
-                # Phase2+: datasetName is the ZFS dataset path when Samba mounts from the host.
-                datasetName: {type: string}
-                # Phase2+ (preferred): pvcName is a CSI-backed volume; Samba mounts it as a Pod volume.
-                pvcName: {type: string}
-                mountPath: {type: string}
-                shareName: {type: string}
-                readOnly: {type: boolean}
-                serviceType: {type: string}
-                nodePort: {type: integer}
-                users:
-                  type: array
-                  items:
-                    type: object
-                    required: [username, passwordSecretRef]
-                    properties:
-                      username: {type: string}
-                      passwordSecretRef:
-                        type: object
-                        required: [name]
-                        properties:
-                          name: {type: string}
-                options:
-                  type: object
-                  x-kubernetes-preserve-unknown-fields: true
-            status:
-              type: object
-              properties:
-                phase: {type: string}
-                message: {type: string}
-                endpoint: {type: string}
-      subresources:
-        status: {}
----
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
   name: nasusers.nas.io
 spec:
   group: nas.io
