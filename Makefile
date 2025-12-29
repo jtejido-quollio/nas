@@ -105,29 +105,16 @@ cleanup-phase1:
 	@echo "Cleanup complete."
 	@echo "Phase1 sample cleanup complete."
 
-deploy-phase2: deploy-crds deploy-node-agent deploy-operator
+deploy-phase2: deploy-crds deploy-node-agent deploy-operator deploy-storage
 	$(KUBECTL) apply -k config/samples/phase2
 	@echo "Phase2 resources applied."
 	@$(MAKE) phase2-smoke
 
 phase2-smoke:
-	@echo "== Waiting for namespace $(NAMESPACE) =="
-	$(KUBECTL) get ns $(NAMESPACE) >/dev/null 2>&1 || (echo "Namespace missing"; exit 1)
-
-	@echo "== Waiting for node-agent DaemonSet =="
-	$(KUBECTL) -n $(NAMESPACE) rollout status ds/nas-node-agent --timeout=180s
-
-	@echo "== Waiting for operator =="
-	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/nas-operator --timeout=180s
-
-	@echo "== Current core pods =="
-	$(KUBECTL) -n $(NAMESPACE) get pods -o wide
-
-	@echo "== Sample CRs =="
-	-$(KUBECTL) -n $(NAMESPACE) get zpool,zdataset,smbshare,zsnapshotschedule,zsnapshotrestore 2>/dev/null || true
+	KUBECTL="$(KUBECTL)" NAMESPACE="$(NAMESPACE)" ./scripts/phase2-health.sh
 
 	@echo "== Helpful commands =="
-	@echo "kubectl -n $(NAMESPACE) describe smbshare home-share"
+	@echo "kubectl -n $(NAMESPACE) describe nasshare home-share"
 	@echo "kubectl -n $(NAMESPACE) describe zsnapshotschedule home-every-2min"
 	@echo "kubectl -n $(NAMESPACE) get svc -o wide"
 	@echo ""

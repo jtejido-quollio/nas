@@ -3,6 +3,7 @@ set -euo pipefail
 
 INSTALL_ZFS=1
 INSTALL_K3S=1
+INSTALL_NFS=1
 DEPLOY=1
 BUILD_IMAGES=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,6 +16,7 @@ Usage: scripts/bootstrap.sh [options]
 Options:
   --skip-zfs        Skip installing zfsutils-linux
   --skip-k3s        Skip installing k3s
+  --skip-nfs        Skip installing nfs-kernel-server
   --skip-deploy     Skip deploying CRDs/node-agent/operator
   --build-images    Build and load images into k3s if missing
   --repo <path>     Repo root (default: script directory/..)
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-zfs) INSTALL_ZFS=0 ;;
     --skip-k3s) INSTALL_K3S=0 ;;
+    --skip-nfs) INSTALL_NFS=0 ;;
     --skip-deploy) DEPLOY=0 ;;
     --build-images) BUILD_IMAGES=1 ;;
     --repo)
@@ -78,6 +81,14 @@ run_root apt-get install -y curl git make
 if [[ "$INSTALL_ZFS" == "1" ]]; then
   log "Installing ZFS utilities"
   run_root apt-get install -y zfsutils-linux
+fi
+
+if [[ "$INSTALL_NFS" == "1" ]]; then
+  log "Installing NFS server"
+  run_root apt-get install -y nfs-kernel-server
+  if command -v systemctl >/dev/null 2>&1; then
+    run_root systemctl enable --now nfs-kernel-server || run_root systemctl enable --now nfs-server || true
+  fi
 fi
 
 if [[ "$INSTALL_K3S" == "1" ]]; then

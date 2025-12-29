@@ -1,12 +1,13 @@
 apiVersion: nas.io/v1alpha1
 kind: ZDataset
 metadata:
-  name: tank-timemachine
+  name: tank-nfs
   namespace: nas-system
 spec:
   nodeName: worker-1
-  datasetName: tank/timemachine
+  datasetName: tank/nfs
   properties:
-    mountpoint: /mnt/tank/timemachine
-    compression: lz4
     atime: "off"
+    compression: "lz4"
+    mountpoint: /mnt/tank/nfs
+    snapdir: visible

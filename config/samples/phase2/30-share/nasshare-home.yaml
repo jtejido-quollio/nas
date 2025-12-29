@@ -1,0 +1,31 @@
+apiVersion: nas.io/v1alpha1
+kind: NASShare
+metadata:
+  name: home-share
+  namespace: nas-system
+spec:
+  protocol: smb
+  datasetName: tank/home
+  mountPath: /mnt/tank/home
+  shareName: home
+  readOnly: false
+  serviceType: NodePort
+  nodePort: 30445
+  users: ["alice"]
+  options:
+    macosCompat: true
+    encryption: desired
+    browseable: true
+    guestOk: false
+    validUsers: ["alice"]
+    writeList: ["alice"]
+    autoPermissions:
+      mode: "0777"
+    createMask: "0664"
+    directoryMask: "0775"
+    inheritPerms: true
+    snapshotExposure:
+      enabled: true
+      mode: snapdir
+      format: "GMT-%Y.%m.%d-%H.%M.%S"
+      localTime: true

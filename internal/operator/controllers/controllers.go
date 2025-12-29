@@ -24,6 +24,9 @@ func SetupAll(mgr ctrl.Manager, cfg Config) error {
 	if err := (&SMBShareReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&NASShareReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	if err := (&ZSnapshotScheduleReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
 		return err
 	}

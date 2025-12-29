@@ -1,0 +1,27 @@
+apiVersion: nas.io/v1alpha1
+kind: NASShare
+metadata:
+  name: timemachine-share
+  namespace: nas-system
+spec:
+  protocol: smb
+  pvcName: timemachine-pvc
+  mountPath: /mnt/tank/timemachine
+  shareName: timemachine
+  readOnly: false
+  serviceType: NodePort
+  nodePort: 31445
+  users: ["alice"]
+  options:
+    macosCompat: true
+    encryption: desired
+    browseable: true
+    guestOk: false
+    validUsers: ["alice"]
+    writeList: ["alice"]
+    autoPermissions:
+      mode: "0777"
+    timeMachine:
+      enabled: true
+      advertiseAsTimeMachine: true
+      volumeSizeLimitBytes: 1099511627776

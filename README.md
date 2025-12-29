@@ -17,7 +17,9 @@ A small “control plane” that lets you declare storage and SMB services using
 - **ZSnapshotSchedule** — periodic snapshots + retention pruning (GMT naming)
 - **ZSnapshot** — create a CSI VolumeSnapshot of a PVC
 - **ZSnapshotRestore** — restore from a CSI VolumeSnapshot to a new PVC (mode=csi) or clone a ZFS dataset snapshot (mode=clone)
-- **SMBShare** — deploy Samba to expose a dataset over SMB (Windows + macOS)
+- **NASShare** — SMB or NFS share backed by ZFS datasets or CSI PVCs
+- **NASUser/NASGroup** — local share users and groups (secrets-backed)
+- **SMBShare** — legacy SMB CRD (still supported)
 
 ## Why we built it (vs TrueNAS/FreeNAS)
 Traditional NAS OSes are **appliance-style**: one box, one UI, imperative configuration.
@@ -35,14 +37,15 @@ This system is **GitOps + Kubernetes-style**:
 
 ## Use cases (Phase 2)
 - SMB file share for Windows/macOS clients
+- Kernel NFS export for Linux clients
 - Windows “Previous Versions” via ZFS snapshots + `shadow_copy2`
 - macOS Time Machine target over SMB
 - Safe recovery using snapshot **clone restore**
 - Basic observability via CR status + pod logs
+- Optional directory service config via `options.globalOptions` (manual join)
 
 ## Non-goals (explicitly out of scope)
-- NFS, iSCSI
-- AD/LDAP integration
+- Automated AD/LDAP join
 - HA/replication between nodes
 - UI
 - Multi-tenant isolation

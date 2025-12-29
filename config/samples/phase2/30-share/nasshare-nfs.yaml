@@ -1,0 +1,18 @@
+apiVersion: nas.io/v1alpha1
+kind: NASShare
+metadata:
+  name: nfs-share
+  namespace: nas-system
+spec:
+  protocol: nfs
+  datasetName: tank/nfs
+  mountPath: /mnt/tank/nfs
+  shareName: nfs
+  readOnly: false
+  options:
+    autoPermissions:
+      mode: "0777"
+  nfs:
+    clients:
+      - 192.168.1.0/24
+    options: rw,sync,no_subtree_check

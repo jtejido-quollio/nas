@@ -3,10 +3,13 @@ kind: Kustomization
 namespace: nas-system
 resources:
   - 00-secrets/smb-user-alice.yaml
+  - 00-users/nasuser-alice.yaml
   - 10-pool/zpool.yaml
   - 20-dataset/zdataset-home.yaml
-  - 20-dataset/zdataset-timemachine.yaml
-  - 30-smb/smbshare-home.yaml
-  - 30-smb/smbshare-timemachine.yaml
+  - 20-dataset/zdataset-nfs.yaml
+  - 25-pvc/pvc-timemachine.yaml
+  - 30-share/nasshare-home.yaml
+  - 30-share/nasshare-timemachine.yaml
+  - 30-share/nasshare-nfs.yaml
   - 40-snapshots/zsnapshotschedule-home.yaml
   - 50-restore/zsnapshotrestore-clone.yaml

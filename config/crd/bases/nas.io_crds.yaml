@@ -102,7 +102,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [nodeName, datasetName, mountPath, shareName, serviceType]
+              required: [mountPath, shareName, serviceType]
               properties:
                 nodeName: {type: string}
                 # Phase2+: datasetName is the ZFS dataset path when Samba mounts from the host.
@@ -129,6 +129,132 @@ spec:
                 options:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+                endpoint: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nasusers.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: NASUser
+    listKind: NASUserList
+    plural: nasusers
+    singular: nasuser
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [username, passwordSecretRef]
+              properties:
+                username: {type: string}
+                passwordSecretRef:
+                  type: object
+                  required: [name]
+                  properties:
+                    name: {type: string}
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nasgroups.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: NASGroup
+    listKind: NASGroupList
+    plural: nasgroups
+    singular: nasgroup
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                members:
+                  type: array
+                  items: {type: string}
+            status:
+              type: object
+              properties:
+                phase: {type: string}
+                message: {type: string}
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: nasshares.nas.io
+spec:
+  group: nas.io
+  names:
+    kind: NASShare
+    listKind: NASShareList
+    plural: nasshares
+    singular: nasshare
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [protocol, mountPath, shareName]
+              properties:
+                protocol: {type: string}
+                datasetName: {type: string}
+                pvcName: {type: string}
+                mountPath: {type: string}
+                shareName: {type: string}
+                readOnly: {type: boolean}
+                serviceType: {type: string}
+                nodePort: {type: integer}
+                users:
+                  type: array
+                  items: {type: string}
+                options:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                nfs:
+                  type: object
+                  properties:
+                    clients:
+                      type: array
+                      items: {type: string}
+                    options: {type: string}
             status:
               type: object
               properties:

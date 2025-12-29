@@ -27,7 +27,8 @@ This repo includes a bootstrap helper for Phase 0 setup (ZFS + k3s + core pods):
 ```bash
 ./scripts/bootstrap.sh --build-images
 ```
-Use `--skip-deploy` if you only want dependencies installed.
+Use `--skip-deploy` if you only want dependencies installed, or `--skip-nfs`
+if you don't want the kernel NFS server installed.
 
 ### Optional: systemd service wrapper
 To run the bootstrap at boot, use the unit in `scripts/nas-bootstrap.service`:
@@ -100,9 +101,7 @@ Files to edit (anything with `nodeName`):
 - `config/samples/phase1/10-pool/zpool.yaml`
 - `config/samples/phase2/10-pool/zpool.yaml`
 - `config/samples/phase2/20-dataset/zdataset-home.yaml`
-- `config/samples/phase2/20-dataset/zdataset-timemachine.yaml`
-- `config/samples/phase2/30-smb/smbshare-home.yaml`
-- `config/samples/phase2/30-smb/smbshare-timemachine.yaml`
+- `config/samples/phase2/20-dataset/zdataset-nfs.yaml`
 - `config/samples/phase2/40-snapshots/zsnapshotschedule-home.yaml`
 - `config/samples/phase2/50-restore/zsnapshotrestore-clone.yaml`
 
@@ -150,12 +149,19 @@ Wait until:
 ```bash
 make deploy-phase2
 ```
+Phase 2 uses NASShare resources; the Time Machine share mounts a CSI-backed PVC.
+The home share uses the ZFS dataset directly so snapshot schedules remain aligned.
 
 ## 8) Verify resources
 ```bash
 kubectl -n nas-system get pods -o wide
 kubectl -n nas-system get svc -o wide
-kubectl -n nas-system get zpool,zdataset,smbshare,zsnapshotschedule
+kubectl -n nas-system get zpool,zdataset,nasshare,nasuser,zsnapshotschedule
+```
+
+### Phase 2 health script (optional)
+```bash
+./scripts/phase2-health.sh
 ```
 
 ## 9) Connect from your Mac (SMB)
@@ -169,7 +175,8 @@ On macOS Finder:
 - Go → Connect to Server
 - `smb://<VM-IP>:30445/home`
 
-Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml`.
+Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml` and
+the NASUser in `config/samples/phase2/00-users/nasuser-alice.yaml`.
 Samples set `options.autoPermissions.mode: "0777"` to chmod the dataset mountpoint
 for SMB writes. Remove it if you want to manage permissions manually.
 
@@ -183,14 +190,33 @@ Then disconnect/reconnect the share and check in Terminal:
 ls /Volumes/home/.zfs/snapshot
 ```
 
-## 10) Validate snapshots and Previous Versions
+### Directory services (optional)
+For AD/LDAP, you can inject raw Samba globals via `options.globalOptions` in a
+NASShare (manual join still required). Example:
+```yaml
+options:
+  globalOptions:
+    security: ads
+    realm: EXAMPLE.COM
+    workgroup: EXAMPLE
+```
+
+## 10) Connect via NFS (kernel)
+Ensure `nfs-kernel-server` is installed on the VM (bootstrap does this).
+On macOS:
+```bash
+sudo mkdir -p /Volumes/nfs
+sudo mount -t nfs <VM-IP>:/mnt/tank/nfs /Volumes/nfs
+```
+
+## 11) Validate snapshots and Previous Versions
 - Create a file in the SMB share
 - Wait 2–4 minutes (sample schedule is every 2 minutes)
 - Modify/delete the file
 - On Windows: right-click → Properties → Previous Versions
  - On macOS: list `.zfs/snapshot` and copy a file out of a snapshot to confirm content
 
-## 11) Restore by clone
+## 12) Restore by clone
 1. List snapshots from ZFS (inside node):
 ```bash
 sudo zfs list -t snapshot -o name -r tank/home | head
@@ -202,7 +228,7 @@ kubectl apply -k config/samples/phase2
 kubectl -n nas-system describe zsnapshotrestore home-restore-clone
 ```
 
-## 12) Cleanup
+## 13) Cleanup
 ```bash
 make cleanup-phase2
 ```

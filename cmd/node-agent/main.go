@@ -50,6 +50,25 @@ type SmartAllResponse struct {
 	Error  string          `json:"error,omitempty"`
 }
 
+type NFSExportRequest struct {
+	Path    string   `json:"path"`
+	Clients []string `json:"clients,omitempty"`
+	Options string   `json:"options,omitempty"`
+}
+
+type NFSExportResponse struct {
+	OK     bool   `json:"ok"`
+	Path   string `json:"path,omitempty"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+type NFSExportListResponse struct {
+	OK     bool     `json:"ok"`
+	Items  []string `json:"items,omitempty"`
+	Error  string   `json:"error,omitempty"`
+}
+
 var diskCache struct {
 	mu      sync.RWMutex
 	disks   []Disk
@@ -57,6 +76,8 @@ var diskCache struct {
 }
 
 var diskRefreshCh = make(chan struct{}, 1)
+
+const nfsExportsPath = "/etc/exports.d/nas-exports"
 
 // Legacy pool create (kept for backward compatibility)
 type ZPoolCreateRequest struct {
@@ -245,6 +266,64 @@ func main() {
 		}
 		resp := probeSmart(path, timeout, useJSON)
 		writeJSON(w, http.StatusOK, resp)
+	})
+
+	// ----- NFS exports -----
+	mux.HandleFunc("/v1/nfs/exports", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		items, err := listNFSExports()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, NFSExportListResponse{OK: false, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, NFSExportListResponse{OK: true, Items: items})
+	})
+
+	mux.HandleFunc("/v1/nfs/export/ensure", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req NFSExportRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, NFSExportResponse{OK: false, Error: "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.Path) == "" {
+			writeJSON(w, http.StatusBadRequest, NFSExportResponse{OK: false, Error: "path required"})
+			return
+		}
+		out, err := ensureNFSExport(req.Path, req.Clients, req.Options)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, NFSExportResponse{OK: false, Path: req.Path, Output: out, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, NFSExportResponse{OK: true, Path: req.Path, Output: out})
+	})
+
+	mux.HandleFunc("/v1/nfs/export/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req NFSExportRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, NFSExportResponse{OK: false, Error: "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.Path) == "" {
+			writeJSON(w, http.StatusBadRequest, NFSExportResponse{OK: false, Error: "path required"})
+			return
+		}
+		out, err := deleteNFSExport(req.Path)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, NFSExportResponse{OK: false, Path: req.Path, Output: out, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, NFSExportResponse{OK: true, Path: req.Path, Output: out})
 	})
 
 	// ----- Pools -----
@@ -1136,6 +1215,170 @@ func runSmartctl(device string, timeout time.Duration, useJSON bool) (string, ma
 		err = err2
 	}
 	return out, nil, err
+}
+
+func listNFSExports() ([]string, error) {
+	b, err := os.ReadFile(nfsExportsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	lines := strings.Split(string(b), "\n")
+	var out []string
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		out = append(out, trim)
+	}
+	return out, nil
+}
+
+func ensureNFSExport(path string, clients []string, options string) (string, error) {
+	if _, err := exec.LookPath("exportfs"); err != nil {
+		return "", fmt.Errorf("exportfs not found")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errors.New("path empty")
+	}
+	if len(clients) == 0 {
+		clients = []string{"*"}
+	}
+	options = strings.TrimSpace(options)
+	if options == "" {
+		options = "rw,sync,no_subtree_check"
+	}
+	entry := buildNFSExportLine(path, clients, options)
+	lines, changed := upsertNFSExportLine(path, entry)
+	if changed {
+		if err := writeNFSExports(lines); err != nil {
+			return "", err
+		}
+	}
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "exportfs", "-ra")
+	if err != nil {
+		return out, fmt.Errorf("exportfs reload failed: %w", err)
+	}
+	return out, nil
+}
+
+func deleteNFSExport(path string) (string, error) {
+	if _, err := exec.LookPath("exportfs"); err != nil {
+		return "", fmt.Errorf("exportfs not found")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", errors.New("path empty")
+	}
+	lines, changed := removeNFSExportLine(path)
+	if changed {
+		if err := writeNFSExports(lines); err != nil {
+			return "", err
+		}
+	}
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "exportfs", "-ra")
+	if err != nil {
+		return out, fmt.Errorf("exportfs reload failed: %w", err)
+	}
+	return out, nil
+}
+
+func buildNFSExportLine(path string, clients []string, options string) string {
+	var b strings.Builder
+	b.WriteString(path)
+	for _, c := range clients {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		b.WriteString(" ")
+		b.WriteString(c)
+		b.WriteString("(")
+		b.WriteString(options)
+		b.WriteString(")")
+	}
+	return b.String()
+}
+
+func upsertNFSExportLine(path string, entry string) ([]string, bool) {
+	lines, err := readNFSExportsRaw()
+	if err != nil {
+		lines = []string{}
+	}
+	var out []string
+	changed := false
+	found := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			out = append(out, line)
+			continue
+		}
+		fields := strings.Fields(trim)
+		if len(fields) > 0 && fields[0] == path {
+			out = append(out, entry)
+			found = true
+			if trim != entry {
+				changed = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if !found {
+		out = append(out, entry)
+		changed = true
+	}
+	return out, changed
+}
+
+func removeNFSExportLine(path string) ([]string, bool) {
+	lines, err := readNFSExportsRaw()
+	if err != nil {
+		return []string{}, false
+	}
+	var out []string
+	changed := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") {
+			out = append(out, line)
+			continue
+		}
+		fields := strings.Fields(trim)
+		if len(fields) > 0 && fields[0] == path {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, changed
+}
+
+func readNFSExportsRaw() ([]string, error) {
+	b, err := os.ReadFile(nfsExportsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	return strings.Split(string(b), "\n"), nil
+}
+
+func writeNFSExports(lines []string) error {
+	if err := os.MkdirAll(filepath.Dir(nfsExportsPath), 0755); err != nil {
+		return err
+	}
+	content := strings.Join(lines, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return os.WriteFile(nfsExportsPath, []byte(content), 0644)
 }
 
 type lsblkJSON struct {

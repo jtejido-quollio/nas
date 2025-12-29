@@ -1,0 +1,9 @@
+apiVersion: nas.io/v1alpha1
+kind: NASUser
+metadata:
+  name: alice
+  namespace: nas-system
+spec:
+  username: alice
+  passwordSecretRef:
+    name: smb-user-alice

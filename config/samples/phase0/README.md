@@ -7,6 +7,7 @@ Bootstrap helper (optional):
 ```bash
 ./scripts/bootstrap.sh --build-images
 ```
+Use `--skip-nfs` if you don't want kernel NFS installed.
 
 Systemd wrapper (optional):
 ```bash

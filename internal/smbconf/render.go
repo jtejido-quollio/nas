@@ -29,6 +29,8 @@ type Options struct {
 	ValidUsers []string
 	WriteList  []string
 
+	GlobalOptions map[string]string
+
 	CreateMask    *string
 	DirectoryMask *string
 	InheritPerms  *bool
@@ -50,17 +52,33 @@ func Render(shareName, path string, readOnly bool, o Options) (string, error) {
 		return "", fmt.Errorf("invalid directoryMask: %q", *o.DirectoryMask)
 	}
 
-	global := `[global]
-  server role = standalone server
-  map to guest = never
-  disable netbios = yes
-  smb ports = 445
-  log level = 1
-  load printers = no
-  printing = bsd
-  printcap name = /dev/null
-  disable spoolss = yes
-`
+	globalLines := []string{
+		"[global]",
+		"  server role = standalone server",
+		"  map to guest = never",
+		"  disable netbios = yes",
+		"  smb ports = 445",
+		"  log level = 1",
+		"  load printers = no",
+		"  printing = bsd",
+		"  printcap name = /dev/null",
+		"  disable spoolss = yes",
+	}
+	if len(o.GlobalOptions) > 0 {
+		keys := make([]string, 0, len(o.GlobalOptions))
+		for k := range o.GlobalOptions {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			v := strings.TrimSpace(o.GlobalOptions[k])
+			if v == "" {
+				continue
+			}
+			globalLines = append(globalLines, fmt.Sprintf("  %s = %s", k, v))
+		}
+	}
+	global := strings.Join(globalLines, "\n") + "\n"
 
 	yesno := func(b bool) string {
 		if b {

@@ -37,12 +37,13 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	spec := obj.Spec
 	shareName := spec.ShareName
 	datasetName := spec.DatasetName
+	pvcName := spec.PVCName
 	mountPath := spec.MountPath
 	readOnly := spec.ReadOnly
 	svcType := spec.ServiceType
 	nodePort64 := int64(spec.NodePort)
 
-	if strings.TrimSpace(datasetName) != "" {
+	if strings.TrimSpace(pvcName) == "" && strings.TrimSpace(datasetName) != "" {
 		na := NewNodeAgentClient(r.Cfg)
 		body := map[string]any{"dataset": datasetName}
 		if strings.TrimSpace(mountPath) != "" {
@@ -104,6 +105,21 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Deployment (uses dperson/samba; runs users.sh then starts samba)
 	replicas := int32(1)
+	dataVolume := corev1.Volume{
+		Name: "data",
+	}
+	if strings.TrimSpace(pvcName) != "" {
+		dataVolume.VolumeSource = corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+				ReadOnly:  readOnly,
+			},
+		}
+	} else {
+		dataVolume.VolumeSource = corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{Path: mountPath},
+		}
+	}
 	dep := appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: depName, Namespace: ns},
 		Spec: appsv1.DeploymentSpec{
@@ -132,7 +148,7 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "conf", MountPath: "/etc/smb"},
-								{Name: "data", MountPath: mountPath},
+								{Name: "data", MountPath: mountPath, ReadOnly: readOnly},
 							},
 						},
 					},
@@ -145,12 +161,7 @@ func (r *SMBShareReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 								},
 							},
 						},
-						{
-							Name: "data",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{Path: mountPath},
-							},
-						},
+						dataVolume,
 					},
 				},
 			},
@@ -259,6 +270,14 @@ func parseOptions(m map[string]any) smbconf.Options {
 		for _, x := range v {
 			if s, ok := x.(string); ok {
 				o.WriteList = append(o.WriteList, s)
+			}
+		}
+	}
+	if v, ok := m["globalOptions"].(map[string]any); ok {
+		o.GlobalOptions = map[string]string{}
+		for k, raw := range v {
+			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+				o.GlobalOptions[k] = s
 			}
 		}
 	}

@@ -41,6 +41,10 @@ spec:
             - name: mnt
               mountPath: /mnt
               mountPropagation: Bidirectional
+            - name: exports
+              mountPath: /etc/exports.d
+            - name: nfs-state
+              mountPath: /var/lib/nfs
       volumes:
         - name: dev
           hostPath: { path: /dev }
@@ -50,3 +54,11 @@ spec:
           hostPath: { path: /run }
         - name: mnt
           hostPath: { path: /mnt }
+        - name: exports
+          hostPath:
+            path: /etc/exports.d
+            type: DirectoryOrCreate
+        - name: nfs-state
+          hostPath:
+            path: /var/lib/nfs
+            type: DirectoryOrCreate
