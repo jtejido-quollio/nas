@@ -25,7 +25,7 @@ log "Current pods"
 ${KUBECTL_BIN} -n "${NAMESPACE}" get pods -o wide
 
 log "Phase2 CRs"
-${KUBECTL_BIN} -n "${NAMESPACE}" get zpool,zdataset,nasshare,nasuser,nasgroup,zsnapshotschedule,zsnapshotrestore 2>/dev/null || true
+${KUBECTL_BIN} -n "${NAMESPACE}" get zpool,zdataset,nasshare,nasdirectory,nasuser,nasgroup,zsnapshotschedule,zsnapshotrestore 2>/dev/null || true
 
 log "NFS exports (node-agent)"
 node_agent_pod="$(${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app=nas-node-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
