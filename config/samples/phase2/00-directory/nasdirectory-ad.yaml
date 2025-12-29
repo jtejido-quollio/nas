@@ -1,0 +1,20 @@
+apiVersion: nas.io/v1alpha1
+kind: NASDirectory
+metadata:
+  name: ad
+  namespace: nas-system
+spec:
+  type: activeDirectory
+  servers:
+    - ldap://192.168.1.8:389
+  baseDN: DC=nas,DC=local
+  realm: NAS.LOCAL
+  workgroup: NAS
+  bind:
+    username: Administrator
+    secretRef:
+      name: ad-bind
+  idMapping:
+    strategy: rfc2307
+    uidAttribute: uidNumber
+    gidAttribute: gidNumber

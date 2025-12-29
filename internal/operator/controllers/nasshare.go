@@ -12,6 +12,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -95,9 +96,10 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 		_ = r.Status().Update(ctx, obj)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-	if err := requireLocalDirectory(dir); err != nil {
+	dirType := directoryType(dir)
+	if dirType == "ldap" {
 		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
+		obj.Status.Message = "SMB requires directory type local or activeDirectory"
 		_ = r.Status().Update(ctx, obj)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
@@ -114,6 +116,31 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 	readOnly := spec.ReadOnly
 	svcType := spec.ServiceType
 	nodePort64 := int64(spec.NodePort)
+
+	dirCMName := fmt.Sprintf("nasdirectory-%s-smb", dir.GetName())
+	var dirCM corev1.ConfigMap
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: dirCMName}, &dirCM); err != nil {
+		if !errors.IsNotFound(err) {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		obj.Status.Phase = "Error"
+		obj.Status.Message = fmt.Sprintf("directory configmap %s not found", dirCMName)
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	var adJoinUser, adJoinSecret string
+	if dirType == "activeDirectory" {
+		adJoinUser, adJoinSecret = directoryBindCredentials(dir)
+		if strings.TrimSpace(adJoinUser) == "" || strings.TrimSpace(adJoinSecret) == "" {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = "activeDirectory requires bind.username and bind.secretRef"
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
 
 	if strings.TrimSpace(spec.PVCName) == "" && strings.TrimSpace(spec.DatasetName) != "" {
 		na := NewNodeAgentClient(r.Cfg)
@@ -140,25 +167,41 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 
 	// Options - best-effort map into our allowlisted renderer.
 	opts := parseOptions(spec.Options)
+	if opts.GlobalOptions == nil {
+		opts.GlobalOptions = map[string]string{}
+	}
+	if _, ok := opts.GlobalOptions["include"]; !ok {
+		opts.GlobalOptions["include"] = "/etc/smb/directory/smb.conf"
+	}
 
 	var allowSel, roSel nasv1.NASSharePrincipalSelector
 	if spec.Permissions != nil {
 		allowSel = spec.Permissions.Allow
 		roSel = spec.Permissions.ReadOnly
 	}
-	allowUsers, allowNames, err := resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), allowSel)
-	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		_ = r.Status().Update(ctx, obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	roUsers, roNames, err := resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), roSel)
-	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		_ = r.Status().Update(ctx, obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	var allowUsers, roUsers []smbUser
+	var allowNames, roNames []string
+	if dirType == "local" {
+		var err error
+		allowUsers, allowNames, err = resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), allowSel)
+		if err != nil {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		roUsers, roNames, err = resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), roSel)
+		if err != nil {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	} else {
+		allowUsers, allowGroups := selectorPrincipals(allowSel)
+		roUsers, roGroups := selectorPrincipals(roSel)
+		allowNames = formatSMBPrincipals(allowUsers, allowGroups)
+		roNames = formatSMBPrincipals(roUsers, roGroups)
 	}
 
 	if len(allowNames)+len(roNames) > 0 {
@@ -170,10 +213,19 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 		}
 	}
 
-	if len(allowUsers)+len(roUsers) == 0 {
-		if opts.GuestOk == nil || !*opts.GuestOk {
+	if dirType == "local" {
+		if len(allowUsers)+len(roUsers) == 0 {
+			if opts.GuestOk == nil || !*opts.GuestOk {
+				obj.Status.Phase = "Error"
+				obj.Status.Message = "no local users resolved for SMB share"
+				_ = r.Status().Update(ctx, obj)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			}
+		}
+	} else {
+		if len(opts.ValidUsers) == 0 && (opts.GuestOk == nil || !*opts.GuestOk) {
 			obj.Status.Phase = "Error"
-			obj.Status.Message = "no local users resolved for SMB share"
+			obj.Status.Message = "no directory principals configured for SMB share"
 			_ = r.Status().Update(ctx, obj)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
@@ -187,13 +239,18 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	users := mergeSMBUsers(allowUsers, roUsers)
-	userScript, err := buildUserScript(ctx, r.Client, ns, users)
-	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		_ = r.Status().Update(ctx, obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	var userScript string
+	if dirType == "local" {
+		users := mergeSMBUsers(allowUsers, roUsers)
+		userScript, err = buildUserScript(ctx, r.Client, ns, users)
+		if err != nil {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	} else {
+		userScript = "#!/bin/sh\nset -e\n"
 	}
 
 	cmName := fmt.Sprintf("smbshare-%s-conf", obj.GetName())
@@ -228,6 +285,69 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 			HostPath: &corev1.HostPathVolumeSource{Path: mountPath},
 		}
 	}
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "conf", MountPath: "/etc/smb"},
+		{Name: "directory", MountPath: "/etc/smb/directory", ReadOnly: true},
+		{Name: "data", MountPath: mountPath, ReadOnly: readOnly},
+	}
+	volumes := []corev1.Volume{
+		{
+			Name: "conf",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
+				},
+			},
+		},
+		{
+			Name: "directory",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: dirCMName},
+				},
+			},
+		},
+		dataVolume,
+	}
+
+	var initContainers []corev1.Container
+	if dirType == "activeDirectory" {
+		volumeMounts = append(volumeMounts,
+			corev1.VolumeMount{Name: "directory", MountPath: "/etc/krb5.conf", SubPath: "krb5.conf", ReadOnly: true},
+			corev1.VolumeMount{Name: "samba-state", MountPath: "/var/lib/samba"},
+		)
+		volumes = append(volumes, corev1.Volume{
+			Name:         "samba-state",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
+		initContainers = append(initContainers, corev1.Container{
+			Name:            "smb-join",
+			Image:           "dperson/samba:latest",
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         []string{"/bin/sh", "-c"},
+			Args: []string{
+				"net ads testjoin -s /etc/smb/smb.conf -k >/dev/null 2>&1 || net ads join -s /etc/smb/smb.conf -U \"$AD_JOIN_USER%$AD_JOIN_PASS\"",
+			},
+			Env: []corev1.EnvVar{
+				{Name: "AD_JOIN_USER", Value: adJoinUser},
+				{
+					Name: "AD_JOIN_PASS",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: adJoinSecret},
+							Key:                  "password",
+						},
+					},
+				},
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "conf", MountPath: "/etc/smb"},
+				{Name: "directory", MountPath: "/etc/smb/directory", ReadOnly: true},
+				{Name: "directory", MountPath: "/etc/krb5.conf", SubPath: "krb5.conf", ReadOnly: true},
+				{Name: "samba-state", MountPath: "/var/lib/samba"},
+			},
+		})
+	}
 	dep := appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            depName,
@@ -238,8 +358,14 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": depName}},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": depName}},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": depName},
+					Annotations: map[string]string{
+						fmt.Sprintf("nas.io/directory-%s", dir.GetName()): strings.TrimSpace(dir.Status.AppliedHash),
+					},
+				},
 				Spec: corev1.PodSpec{
+					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						{
 							Name:  "samba",
@@ -254,23 +380,10 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 							Args: []string{
 								"sh /etc/smb/users.sh && if command -v samba.sh >/dev/null 2>&1; then exec samba.sh -I /etc/smb/smb.conf; else exec /usr/sbin/smbd -F -s /etc/smb/smb.conf; fi",
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "conf", MountPath: "/etc/smb"},
-								{Name: "data", MountPath: mountPath, ReadOnly: readOnly},
-							},
+							VolumeMounts: volumeMounts,
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "conf",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
-								},
-							},
-						},
-						dataVolume,
-					},
+					Volumes: volumes,
 				},
 			},
 		},
@@ -327,11 +440,14 @@ func (r *NASShareReconciler) reconcileNFS(ctx context.Context, obj *nasv1.NASSha
 		_ = r.Status().Update(ctx, obj)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-	if err := requireLocalDirectory(dir); err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		_ = r.Status().Update(ctx, obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	dirType := directoryType(dir)
+	if dirType != "local" {
+		if err := r.applyNFSDirectoryConfig(ctx, ns, dir); err != nil {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = err.Error()
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	na := NewNodeAgentClient(r.Cfg)
@@ -398,6 +514,26 @@ func (r *NASShareReconciler) deleteNFSExport(ctx context.Context, obj *nasv1.NAS
 	na := NewNodeAgentClient(r.Cfg)
 	body := map[string]any{"path": obj.Spec.MountPath}
 	return na.do(ctx, "POST", "/v1/nfs/export/delete", body, nil, nil)
+}
+
+func (r *NASShareReconciler) applyNFSDirectoryConfig(ctx context.Context, ns string, dir *nasv1.NASDirectory) error {
+	secretName := fmt.Sprintf("nasdirectory-%s-nfs-sssd", dir.GetName())
+	var sec corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: secretName}, &sec); err != nil {
+		return fmt.Errorf("sssd secret %s not found: %w", secretName, err)
+	}
+	conf := strings.TrimSpace(string(sec.Data["sssd.conf"]))
+	if conf == "" {
+		return fmt.Errorf("sssd.conf missing in %s", secretName)
+	}
+	body := map[string]any{
+		"config": conf,
+	}
+	if ca := sec.Data["ca.crt"]; len(ca) > 0 {
+		body["caBundle"] = string(ca)
+	}
+	na := NewNodeAgentClient(r.Cfg)
+	return na.do(ctx, "POST", "/v1/nfs/sssd/apply", body, nil, nil)
 }
 
 func normalizeNFSOptions(raw string, readOnly bool) string {

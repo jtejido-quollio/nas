@@ -85,6 +85,39 @@ func resolveLocalUsernames(ctx context.Context, c client.Client, ns string, dire
 	return uniqueStrings(out), nil
 }
 
+func selectorPrincipals(sel nasv1.NASSharePrincipalSelector) ([]string, []string) {
+	var users []string
+	for _, name := range sel.Users {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			users = append(users, name)
+		}
+	}
+	var groups []string
+	for _, name := range sel.Groups {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			groups = append(groups, name)
+		}
+	}
+	return uniqueStrings(users), uniqueStrings(groups)
+}
+
+func formatSMBPrincipals(users []string, groups []string) []string {
+	out := append([]string{}, users...)
+	for _, g := range groups {
+		if g == "" {
+			continue
+		}
+		if strings.HasPrefix(g, "@") {
+			out = append(out, g)
+		} else {
+			out = append(out, "@"+g)
+		}
+	}
+	return uniqueStrings(out)
+}
+
 func buildUserScript(ctx context.Context, c client.Client, ns string, users []smbUser) (string, error) {
 	lines := []string{"#!/bin/sh", "set -e"}
 	for _, u := range users {

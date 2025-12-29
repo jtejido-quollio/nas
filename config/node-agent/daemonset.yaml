@@ -45,6 +45,8 @@ spec:
               mountPath: /etc/exports.d
             - name: nfs-state
               mountPath: /var/lib/nfs
+            - name: sssd
+              mountPath: /etc/sssd
       volumes:
         - name: dev
           hostPath: { path: /dev }
@@ -61,4 +63,8 @@ spec:
         - name: nfs-state
           hostPath:
             path: /var/lib/nfs
+            type: DirectoryOrCreate
+        - name: sssd
+          hostPath:
+            path: /etc/sssd
             type: DirectoryOrCreate

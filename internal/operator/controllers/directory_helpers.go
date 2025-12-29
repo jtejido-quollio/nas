@@ -39,3 +39,12 @@ func requireLocalDirectory(dir *nasv1.NASDirectory) error {
 	}
 	return nil
 }
+
+func directoryBindCredentials(dir *nasv1.NASDirectory) (string, string) {
+	if dir == nil || dir.Spec.Bind == nil || dir.Spec.Bind.SecretRef == nil {
+		return "", ""
+	}
+	user := strings.TrimSpace(dir.Spec.Bind.Username)
+	secret := strings.TrimSpace(dir.Spec.Bind.SecretRef.Name)
+	return user, secret
+}

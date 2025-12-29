@@ -39,6 +39,8 @@ spec:
               properties:
                 phase: {type: string}
                 message: {type: string}
+                appliedHash: {type: string}
+                observedGeneration: {type: integer}
       subresources:
         status: {}
 ---
@@ -108,6 +110,8 @@ spec:
                   type: array
                   items: {type: string}
                 baseDN: {type: string}
+                realm: {type: string}
+                workgroup: {type: string}
                 bind:
                   type: object
                   properties:

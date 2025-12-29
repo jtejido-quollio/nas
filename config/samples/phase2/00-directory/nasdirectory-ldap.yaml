@@ -1,0 +1,18 @@
+apiVersion: nas.io/v1alpha1
+kind: NASDirectory
+metadata:
+  name: ldap
+  namespace: nas-system
+spec:
+  type: ldap
+  servers:
+    - ldap://192.168.1.8:3890
+  baseDN: DC=nas,DC=local
+  bind:
+    username: uid=admin,ou=people,dc=nas,dc=local
+    secretRef:
+      name: ldap-bind
+  idMapping:
+    strategy: rfc2307
+    uidAttribute: uidNumber
+    gidAttribute: gidNumber

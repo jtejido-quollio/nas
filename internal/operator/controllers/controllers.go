@@ -21,6 +21,9 @@ func SetupAll(mgr ctrl.Manager, cfg Config) error {
 	if err := (&ZSnapshotReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&NASDirectoryReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	if err := (&NASShareReconciler{Client: mgr.GetClient(), Cfg: cfg}).SetupWithManager(mgr); err != nil {
 		return err
 	}

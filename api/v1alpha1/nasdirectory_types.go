@@ -10,13 +10,15 @@ type NASDirectorySpec struct {
 	// Type is one of: local, ldap, activeDirectory.
 	Type string `json:"type"`
 
-	Servers []string `json:"servers,omitempty"`
-	BaseDN  string   `json:"baseDN,omitempty"`
+	Servers   []string `json:"servers,omitempty"`
+	BaseDN    string   `json:"baseDN,omitempty"`
+	Realm     string   `json:"realm,omitempty"`
+	Workgroup string   `json:"workgroup,omitempty"`
 
 	Bind *NASDirectoryBind `json:"bind,omitempty"`
 	TLS  *NASDirectoryTLS  `json:"tls,omitempty"`
 
-	IDMapping      *NASDirectoryIDMapping      `json:"idMapping,omitempty"`
+	IDMapping       *NASDirectoryIDMapping       `json:"idMapping,omitempty"`
 	GroupResolution *NASDirectoryGroupResolution `json:"groupResolution,omitempty"`
 
 	// Local config is used when type=local.
@@ -24,7 +26,7 @@ type NASDirectorySpec struct {
 }
 
 type NASDirectoryBind struct {
-	Username  string            `json:"username,omitempty"`
+	Username  string             `json:"username,omitempty"`
 	SecretRef *PasswordSecretRef `json:"secretRef,omitempty"`
 }
 
@@ -52,8 +54,10 @@ type NASDirectoryLocal struct {
 }
 
 type NASDirectoryStatus struct {
-	Phase   string `json:"phase,omitempty"`
-	Message string `json:"message,omitempty"`
+	Phase              string `json:"phase,omitempty"`
+	Message            string `json:"message,omitempty"`
+	AppliedHash        string `json:"appliedHash,omitempty"`
+	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

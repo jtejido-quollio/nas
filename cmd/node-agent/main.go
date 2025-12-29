@@ -37,17 +37,17 @@ type DiskCacheStatus struct {
 }
 
 type SmartResponse struct {
-	OK     bool            `json:"ok"`
-	Device string          `json:"device,omitempty"`
-	Output string          `json:"output,omitempty"`
-	JSON   map[string]any  `json:"json,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	OK     bool           `json:"ok"`
+	Device string         `json:"device,omitempty"`
+	Output string         `json:"output,omitempty"`
+	JSON   map[string]any `json:"json,omitempty"`
+	Error  string         `json:"error,omitempty"`
 }
 
 type SmartAllResponse struct {
-	OK     bool            `json:"ok"`
-	Items  []SmartResponse `json:"items,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	OK    bool            `json:"ok"`
+	Items []SmartResponse `json:"items,omitempty"`
+	Error string          `json:"error,omitempty"`
 }
 
 type NFSExportRequest struct {
@@ -64,9 +64,20 @@ type NFSExportResponse struct {
 }
 
 type NFSExportListResponse struct {
-	OK     bool     `json:"ok"`
-	Items  []string `json:"items,omitempty"`
-	Error  string   `json:"error,omitempty"`
+	OK    bool     `json:"ok"`
+	Items []string `json:"items,omitempty"`
+	Error string   `json:"error,omitempty"`
+}
+
+type NFSSSSDApplyRequest struct {
+	Config   string `json:"config"`
+	CABundle string `json:"caBundle,omitempty"`
+}
+
+type NFSSSSDApplyResponse struct {
+	OK     bool   `json:"ok"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 var diskCache struct {
@@ -280,6 +291,24 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, NFSExportListResponse{OK: true, Items: items})
+	})
+
+	mux.HandleFunc("/v1/nfs/sssd/apply", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req NFSSSSDApplyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, NFSSSSDApplyResponse{OK: false, Error: "invalid json"})
+			return
+		}
+		out, err := applyNFSSSSDConfig(req.Config, req.CABundle)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, NFSSSSDApplyResponse{OK: false, Output: out, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, NFSSSSDApplyResponse{OK: true, Output: out})
 	})
 
 	mux.HandleFunc("/v1/nfs/export/ensure", func(w http.ResponseWriter, r *http.Request) {
@@ -1379,6 +1408,37 @@ func writeNFSExports(lines []string) error {
 		content += "\n"
 	}
 	return os.WriteFile(nfsExportsPath, []byte(content), 0644)
+}
+
+func applyNFSSSSDConfig(conf string, caBundle string) (string, error) {
+	conf = strings.TrimSpace(conf)
+	if conf == "" {
+		return "", fmt.Errorf("sssd.conf required")
+	}
+	if err := os.MkdirAll("/etc/sssd", 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile("/etc/sssd/sssd.conf", []byte(conf), 0600); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(caBundle) != "" {
+		if err := os.MkdirAll("/etc/sssd/certs", 0755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile("/etc/sssd/certs/ca.crt", []byte(caBundle), 0644); err != nil {
+			return "", err
+		}
+	}
+
+	var out string
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		cmdOut, cmdErr := runCmdCombined(context.Background(), 30*time.Second, "systemctl", "restart", "sssd")
+		out = cmdOut
+		if cmdErr != nil {
+			out = strings.TrimSpace(out + "\n" + cmdErr.Error())
+		}
+	}
+	return out, nil
 }
 
 type lsblkJSON struct {
