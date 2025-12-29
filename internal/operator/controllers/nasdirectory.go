@@ -460,6 +460,7 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 	if bindUser == "" {
 		return "", nil, fmt.Errorf("bind.username required for %s directory", dirType)
 	}
+	bindUser = normalizeBindDN(dirType, bindUser, dir.Spec.BaseDN)
 
 	_, _, domain, err := deriveADNames(dir.Spec)
 	if err != nil && strings.TrimSpace(dir.Spec.BaseDN) == "" {
@@ -480,6 +481,7 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 
 	caBundle := caBundleBytes(caSecret)
 	useTLS := len(caBundle) > 0
+	useStartTLS := dirType == "activeDirectory" && !serversHaveLDAPS(uris)
 
 	lines := []string{
 		"[sssd]",
@@ -496,6 +498,9 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 		"ldap_default_authtok_type = password",
 		"cache_credentials = True",
 		"enumerate = True",
+	}
+	if useStartTLS {
+		lines = append(lines, "ldap_id_use_start_tls = True")
 	}
 
 	strategy := ""
@@ -516,6 +521,8 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 			"ldap_tls_reqcert = demand",
 			"ldap_tls_cacert = /etc/sssd/certs/ca.crt",
 		)
+	} else if useStartTLS {
+		lines = append(lines, "ldap_tls_reqcert = allow")
 	}
 
 	return strings.Join(lines, "\n") + "\n", caBundle, nil
@@ -587,6 +594,20 @@ func idmapRange(idmap *nasv1.NASDirectoryIDMapping) (int64, int64) {
 	return start, end
 }
 
+func normalizeBindDN(dirType, username, baseDN string) string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ""
+	}
+	if strings.Contains(username, "=") || strings.Contains(username, "@") {
+		return username
+	}
+	if dirType == "activeDirectory" && strings.TrimSpace(baseDN) != "" {
+		return fmt.Sprintf("CN=%s,CN=Users,%s", username, baseDN)
+	}
+	return username
+}
+
 func firstServerHost(servers []string) string {
 	for _, raw := range servers {
 		raw = strings.TrimSpace(raw)
@@ -615,6 +636,19 @@ func cleanServers(in []string) []string {
 		out = append(out, raw)
 	}
 	return out
+}
+
+func serversHaveLDAPS(servers []string) bool {
+	for _, raw := range servers {
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(parsed.Scheme, "ldaps") {
+			return true
+		}
+	}
+	return false
 }
 
 func caBundleBytes(sec *corev1.Secret) []byte {
