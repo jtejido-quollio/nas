@@ -26,10 +26,10 @@ rules:
     resources: ["volumesnapshots","volumesnapshotcontents","volumesnapshotclasses"]
     verbs: ["get","list","watch","create","update","patch","delete"]
   - apiGroups: ["nas.io"]
-    resources: ["zpools","zdatasets","nasshares","nasusers","nasgroups","zsnapshots","zsnapshotschedules","zsnapshotrestores"]
+    resources: ["zpools","zdatasets","nasshares","nasdirectories","nasusers","nasgroups","zsnapshots","zsnapshotschedules","zsnapshotrestores"]
     verbs: ["get","list","watch","create","update","patch","delete"]
   - apiGroups: ["nas.io"]
-    resources: ["zpools/status","zdatasets/status","nasshares/status","nasusers/status","nasgroups/status","zsnapshots/status","zsnapshotschedules/status","zsnapshotrestores/status"]
+    resources: ["zpools/status","zdatasets/status","nasshares/status","nasdirectories/status","nasusers/status","nasgroups/status","zsnapshots/status","zsnapshotschedules/status","zsnapshotrestores/status"]
     verbs: ["get","update","patch"]
 
   - apiGroups: ["snapshot.storage.k8s.io"]

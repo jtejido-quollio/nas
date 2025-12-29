@@ -153,12 +153,14 @@ Phase 2 uses NASShare resources; the Time Machine share mounts a CSI-backed PVC.
 The home share uses the ZFS dataset directly so snapshot schedules remain aligned.
 The sample Time Machine PVC size is small for labs; adjust `config/samples/phase2/25-pvc/pvc-timemachine.yaml`
 if your pool has more capacity.
+Phase 2 assumes a local directory (`NASDirectory` named `local`) and uses `NASUser`/`NASGroup`
+to define local identities for SMB/NFS.
 
 ## 8) Verify resources
 ```bash
 kubectl -n nas-system get pods -o wide
 kubectl -n nas-system get svc -o wide
-kubectl -n nas-system get zpool,zdataset,nasshare,nasuser,zsnapshotschedule
+kubectl -n nas-system get zpool,zdataset,nasshare,nasdirectory,nasuser,nasgroup,zsnapshotschedule
 ```
 
 ### Phase 2 health script (optional)

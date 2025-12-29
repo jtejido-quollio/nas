@@ -8,17 +8,18 @@ spec:
   pvcName: timemachine-pvc
   mountPath: /mnt/tank/timemachine
   shareName: timemachine
+  directoryRef: local
   readOnly: false
   serviceType: NodePort
   nodePort: 31445
-  users: ["alice"]
+  permissions:
+    allow:
+      users: ["alice"]
   options:
     macosCompat: true
     encryption: desired
     browseable: true
     guestOk: false
-    validUsers: ["alice"]
-    writeList: ["alice"]
     autoPermissions:
       mode: "0777"
     timeMachine:

@@ -7,7 +7,9 @@ import (
 
 // NASGroupSpec defines a local NAS group.
 type NASGroupSpec struct {
-	Members []string `json:"members,omitempty"`
+	DirectoryRef string   `json:"directoryRef,omitempty"`
+	GID          int64    `json:"gid,omitempty"`
+	Members      []string `json:"members,omitempty"`
 }
 
 type NASGroupStatus struct {

@@ -1,0 +1,75 @@
+@startuml
+title Amphora — Identity + Access Integration (Component View)
+
+left to right direction
+skinparam linetype ortho
+skinparam packageStyle rectangle
+hide stereotype
+
+actor "Admin / Operator" as Admin
+actor "LAN Clients\n(Windows/macOS/Linux)" as Clients
+
+package "Control Plane" as CP {
+  [Web UI] as UI
+  [nas-api\n(REST/WebSocket)] as API
+  [nas-operator\n(reconciler)] as OP
+  [nas-node-agent\n(privileged DaemonSet)] as Agent
+  [Kubernetes API\n(k3s)] as K8s
+  database "etcd\n(k3s state)" as ETCD
+}
+
+package "External Identity" as EXTID {
+  [OIDC Provider\n(Keycloak/Zitadel/Entra/Okta)] as OIDC
+  [AD/LDAP Directory\n(AD DS / OpenLDAP)] as DIR
+}
+
+package "Data Plane (Protocol Gateways)" as DP {
+  [SMB Gateway\n(Samba + winbind)] as SMB
+  [NFS Gateway\n(Ganesha or Kernel NFS\n+ SSSD)] as NFS
+  [CSI + ZFS mounts\n(datasets mounted into pods)] as CSI
+}
+
+package "Storage Node" as SN {
+  [ZFS\n(zpool/zfs)] as ZFS
+  [Disks] as DISKS
+}
+
+' ===== Control plane auth (UI/API) =====
+Admin --> UI : manage pools/shares/directories
+UI --> OIDC : OIDC login (Auth Code)
+UI --> API : Bearer token (JWT)
+API --> OIDC : JWKS verify\n(issuer/audience)
+API --> API : RBAC/Capabilities\n(from claims)
+
+' ===== Declarative control plane =====
+API --> K8s : Create/Update CRDs\n(ZPool/ZDataset/ZSnapshot,\nNASDirectory/NASShare/NASExport,\nSecrets/ConfigMaps)
+K8s --> ETCD : Persist desired state
+
+OP --> K8s : Watch CRDs + Secrets\n(Reconcile loop)
+OP --> SMB : Render smb.conf / krb5.conf\n+ rollout
+OP --> NFS : Render exports / sssd.conf\n+ rollout
+
+' ===== Storage operations =====
+OP --> Agent : Request disk/ZFS ops\n(via API/gRPC)
+Agent --> ZFS : Execute zpool/zfs
+ZFS --> DISKS : IO
+
+CSI --> ZFS : Mount datasets
+SMB --> CSI : Use mounted dataset path
+NFS --> CSI : Use mounted dataset path
+
+' ===== Data plane auth (SMB/NFS) =====
+Clients --> SMB : SMB mount + auth\n(Kerberos/NTLM)
+SMB --> DIR : Auth + group resolution\n(LDAP/Kerberos via winbind)
+
+Clients --> NFS : NFS mount\n(UID/GID; optional Kerberos later)
+NFS --> DIR : UID/GID + groups\n(SSSD/LDAP; optional Kerberos)
+
+note bottom
+Separation of concerns:
+- Control plane (UI/API) auth is OIDC (BYO IdP).
+- Data plane (SMB/NFS client access) auth is AD/LDAP directly.
+- UI never touches the host OS; it declares intent -> CRDs -> operator -> gateways/node-agent.
+end note
+
+@enduml

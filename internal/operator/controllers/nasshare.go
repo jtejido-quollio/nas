@@ -2,10 +2,8 @@ package controllers
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +84,24 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 	}
 
 	spec := obj.Spec
+	dirName := strings.TrimSpace(spec.DirectoryRef)
+	if dirName == "" {
+		dirName = "local"
+	}
+	dir, err := resolveDirectory(ctx, r.Client, ns, dirName)
+	if err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = fmt.Sprintf("directory %s not found: %v", dirName, err)
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	if err := requireLocalDirectory(dir); err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = err.Error()
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	if strings.TrimSpace(spec.DatasetName) == "" && strings.TrimSpace(spec.PVCName) == "" {
 		obj.Status.Phase = "Error"
 		obj.Status.Message = "datasetName or pvcName required for SMB shares"
@@ -124,6 +140,45 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 
 	// Options - best-effort map into our allowlisted renderer.
 	opts := parseOptions(spec.Options)
+
+	var allowSel, roSel nasv1.NASSharePrincipalSelector
+	if spec.Permissions != nil {
+		allowSel = spec.Permissions.Allow
+		roSel = spec.Permissions.ReadOnly
+	}
+	allowUsers, allowNames, err := resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), allowSel)
+	if err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = err.Error()
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	roUsers, roNames, err := resolveLocalUsers(ctx, r.Client, ns, dir.GetName(), roSel)
+	if err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = err.Error()
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	if len(allowNames)+len(roNames) > 0 {
+		if len(opts.ValidUsers) == 0 {
+			opts.ValidUsers = uniqueStrings(append(append([]string{}, allowNames...), roNames...))
+		}
+		if len(opts.WriteList) == 0 && len(allowNames) > 0 {
+			opts.WriteList = uniqueStrings(append([]string{}, allowNames...))
+		}
+	}
+
+	if len(allowUsers)+len(roUsers) == 0 {
+		if opts.GuestOk == nil || !*opts.GuestOk {
+			obj.Status.Phase = "Error"
+			obj.Status.Message = "no local users resolved for SMB share"
+			_ = r.Status().Update(ctx, obj)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
 	conf, err := smbconf.Render(shareName, mountPath, readOnly, opts)
 	if err != nil {
 		obj.Status.Phase = "Error"
@@ -132,13 +187,7 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	users, err := resolveNASUsers(ctx, r.Client, ns, spec.Users)
-	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		_ = r.Status().Update(ctx, obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
+	users := mergeSMBUsers(allowUsers, roUsers)
 	userScript, err := buildUserScript(ctx, r.Client, ns, users)
 	if err != nil {
 		obj.Status.Phase = "Error"
@@ -267,6 +316,24 @@ func (r *NASShareReconciler) reconcileNFS(ctx context.Context, obj *nasv1.NASSha
 	}
 
 	spec := obj.Spec
+	dirName := strings.TrimSpace(spec.DirectoryRef)
+	if dirName == "" {
+		dirName = "local"
+	}
+	dir, err := resolveDirectory(ctx, r.Client, ns, dirName)
+	if err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = fmt.Sprintf("directory %s not found: %v", dirName, err)
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	if err := requireLocalDirectory(dir); err != nil {
+		obj.Status.Phase = "Error"
+		obj.Status.Message = err.Error()
+		_ = r.Status().Update(ctx, obj)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	na := NewNodeAgentClient(r.Cfg)
 	if strings.TrimSpace(spec.DatasetName) != "" {
 		body := map[string]any{"dataset": spec.DatasetName}
@@ -375,185 +442,3 @@ func (r *NASShareReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Complete(r)
 }
-
-type smbUser struct {
-	Username           string
-	PasswordSecretName string
-}
-
-func resolveNASUsers(ctx context.Context, c client.Client, ns string, names []string) ([]smbUser, error) {
-	var out []smbUser
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		var u nasv1.NASUser
-		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &u); err != nil {
-			return nil, fmt.Errorf("nasuser %s not found: %w", name, err)
-		}
-		username := strings.TrimSpace(u.Spec.Username)
-		secName := strings.TrimSpace(u.Spec.PasswordSecretRef.Name)
-		if username == "" || secName == "" {
-			continue
-		}
-		out = append(out, smbUser{
-			Username:           username,
-			PasswordSecretName: secName,
-		})
-	}
-	return out, nil
-}
-
-func buildUserScript(ctx context.Context, c client.Client, ns string, users []smbUser) (string, error) {
-	lines := []string{"#!/bin/sh", "set -e"}
-	for _, u := range users {
-		if u.Username == "" || u.PasswordSecretName == "" {
-			continue
-		}
-		var sec corev1.Secret
-		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: u.PasswordSecretName}, &sec); err != nil {
-			return "", err
-		}
-		pw := string(sec.Data["password"])
-		if pw == "" {
-			pw = string(sec.StringData["password"])
-		}
-		enc := base64.StdEncoding.EncodeToString([]byte(pw))
-		lines = append(lines,
-			fmt.Sprintf("id -u %s >/dev/null 2>&1 || adduser -D %s", u.Username, u.Username),
-			fmt.Sprintf("pw=$(echo %s | base64 -d)", enc),
-			fmt.Sprintf("printf '%%s\\n%%s\\n' \"$pw\" \"$pw\" | smbpasswd -a -s %s", u.Username),
-		)
-	}
-	return strings.Join(lines, "\n") + "\n", nil
-}
-
-func parseOptions(m map[string]any) smbconf.Options {
-	var o smbconf.Options
-
-	if v, ok := m["macosCompat"].(bool); ok {
-		o.MacOSCompat = &v
-	}
-	if v, ok := m["encryption"].(string); ok {
-		o.Encryption = &v
-	}
-	if v, ok := m["browseable"].(bool); ok {
-		o.Browseable = &v
-	}
-	if v, ok := m["guestOk"].(bool); ok {
-		o.GuestOk = &v
-	}
-	if v, ok := m["validUsers"].([]any); ok {
-		for _, x := range v {
-			if s, ok := x.(string); ok {
-				o.ValidUsers = append(o.ValidUsers, s)
-			}
-		}
-	}
-	if v, ok := m["writeList"].([]any); ok {
-		for _, x := range v {
-			if s, ok := x.(string); ok {
-				o.WriteList = append(o.WriteList, s)
-			}
-		}
-	}
-	if v, ok := m["globalOptions"].(map[string]any); ok {
-		o.GlobalOptions = map[string]string{}
-		for k, raw := range v {
-			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-				o.GlobalOptions[k] = s
-			}
-		}
-	}
-	if v, ok := m["createMask"].(string); ok {
-		o.CreateMask = &v
-	}
-	if v, ok := m["directoryMask"].(string); ok {
-		o.DirectoryMask = &v
-	}
-	if v, ok := m["inheritPerms"].(bool); ok {
-		o.InheritPerms = &v
-	}
-
-	if se, ok := m["snapshotExposure"].(map[string]any); ok {
-		enabled, _ := se["enabled"].(bool)
-		mode, _ := se["mode"].(string)
-		format, _ := se["format"].(string)
-		var lt *bool
-		if b, ok := se["localTime"].(bool); ok {
-			lt = &b
-		}
-		o.SnapshotExposure = &smbconf.SnapshotExposure{
-			Enabled:   enabled,
-			Mode:      mode,
-			Format:    format,
-			LocalTime: lt,
-		}
-	}
-	if tm, ok := m["timeMachine"].(map[string]any); ok {
-		enabled, _ := tm["enabled"].(bool)
-		var adv *bool
-		if b, ok := tm["advertiseAsTimeMachine"].(bool); ok {
-			adv = &b
-		}
-		var lim *int64
-		if f, ok := tm["volumeSizeLimitBytes"].(float64); ok {
-			v := int64(f)
-			lim = &v
-		}
-		o.TimeMachine = &smbconf.TimeMachine{
-			Enabled:                enabled,
-			AdvertiseAsTimeMachine: adv,
-			VolumeSizeLimitBytes:   lim,
-		}
-	}
-
-	return o
-}
-
-type AutoPermissions struct {
-	Mode      string
-	Recursive bool
-}
-
-func parseAutoPermissions(m map[string]any) *AutoPermissions {
-	if m == nil {
-		return nil
-	}
-	raw, ok := m["autoPermissions"]
-	if !ok || raw == nil {
-		return nil
-	}
-	switch v := raw.(type) {
-	case bool:
-		if !v {
-			return nil
-		}
-		return &AutoPermissions{Mode: "0777"}
-	case map[string]any:
-		if enabled, ok := v["enabled"].(bool); ok && !enabled {
-			return nil
-		}
-		mode := ""
-		switch mv := v["mode"].(type) {
-		case string:
-			mode = strings.TrimSpace(mv)
-		case float64:
-			mode = strconv.FormatInt(int64(mv), 10)
-		case int:
-			mode = strconv.Itoa(mv)
-		case int64:
-			mode = strconv.FormatInt(mv, 10)
-		}
-		if mode == "" {
-			mode = "0777"
-		}
-		rec, _ := v["recursive"].(bool)
-		return &AutoPermissions{Mode: mode, Recursive: rec}
-	default:
-		return nil
-	}
-}
-
-func boolPtr(b bool) *bool { return &b }

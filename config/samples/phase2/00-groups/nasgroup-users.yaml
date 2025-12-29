@@ -1,0 +1,10 @@
+apiVersion: nas.io/v1alpha1
+kind: NASGroup
+metadata:
+  name: users
+  namespace: nas-system
+spec:
+  directoryRef: local
+  gid: 10000
+  members:
+    - alice

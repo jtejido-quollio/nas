@@ -1,0 +1,52 @@
+@startuml
+title Data Plane: AD/LDAP-backed Shares via CRDs (SMB/NFS)
+
+actor "Storage Admin" as Admin
+actor "LAN Client" as Client
+
+participant "Web UI" as UI
+participant "nas-api" as API
+participant "Kubernetes API" as K8s
+participant "nas-operator" as OP
+participant "Samba Gateway Pod" as SMB
+participant "NFS Gateway Pod" as NFS
+participant "AD/LDAP Directory" as DIR
+
+== Configure Directory Source ==
+Admin -> UI : Add Directory (AD/LDAP)
+UI -> API : POST /directories
+API -> K8s : Create/Update NASDirectory CR
+API -> K8s : Create/Update Secret(s)\n(bind creds / keytab / CA bundle)
+
+OP -> K8s : Watch NASDirectory
+OP -> OP : Render configs\n(smb.conf, sssd.conf, krb5.conf)
+OP -> K8s : Update ConfigMaps\n+ rollout gateway pods
+
+== Provision Share/Export ==
+Admin -> UI : Create NASShare / NASExport\n(select groups/users)
+UI -> API : POST /shares or /exports
+API -> K8s : Create NASShare/NASExport CR
+
+OP -> K8s : Watch NASShare/NASExport
+OP -> SMB : Reconcile SMB share config\n(dataset mount + ACL policy)
+OP -> NFS : Reconcile NFS export config\n(dataset mount + export policy)
+
+== Client Access ==
+Client -> SMB : Mount SMB share + login\n(Kerberos/NTLM)
+SMB -> DIR : Authenticate user + resolve groups\n(winbind/LDAP/Kerberos)
+DIR --> SMB : Auth result + group membership
+SMB --> Client : Access granted/denied
+
+Client -> NFS : Mount NFS export\n(UID/GID-based)
+NFS -> DIR : Resolve UID/GID + groups\n(SSSD/LDAP; optional Kerberos later)
+DIR --> NFS : Identity resolution result
+NFS --> Client : Access granted/denied
+
+note bottom
+Control plane auth (OIDC) is independent
+from data plane auth (AD/LDAP for SMB/NFS).
+The UI configures directory sources + share policies;
+the operator reconciles into gateway configs.
+end note
+
+@enduml

@@ -1,5 +1,10 @@
 package v1alpha1
 
+// SecretRef references a Secret by name.
+type SecretRef struct {
+	Name string `json:"name"`
+}
+
 // PasswordSecretRef references a Secret that contains a "password" key.
 type PasswordSecretRef struct {
 	Name string `json:"name"`

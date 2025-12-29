@@ -11,6 +11,16 @@ type NASNFSExport struct {
 	Options string   `json:"options,omitempty"`
 }
 
+type NASSharePrincipalSelector struct {
+	Users  []string `json:"users,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+}
+
+type NASSharePermissions struct {
+	Allow    NASSharePrincipalSelector `json:"allow,omitempty"`
+	ReadOnly NASSharePrincipalSelector `json:"readOnly,omitempty"`
+}
+
 // NASShareSpec defines an abstract share across SMB/NFS.
 type NASShareSpec struct {
 	Protocol    string         `json:"protocol"`
@@ -18,10 +28,11 @@ type NASShareSpec struct {
 	PVCName     string         `json:"pvcName,omitempty"`
 	MountPath   string         `json:"mountPath"`
 	ShareName   string         `json:"shareName"`
+	DirectoryRef string        `json:"directoryRef,omitempty"`
 	ReadOnly    bool           `json:"readOnly,omitempty"`
 	ServiceType string         `json:"serviceType,omitempty"`
 	NodePort    int32          `json:"nodePort,omitempty"`
-	Users       []string       `json:"users,omitempty"`
+	Permissions *NASSharePermissions `json:"permissions,omitempty"`
 	Options     map[string]any `json:"options,omitempty"`
 	NFS         *NASNFSExport  `json:"nfs,omitempty"`
 }
@@ -66,11 +77,47 @@ func (in *NASNFSExport) DeepCopy() *NASNFSExport {
 	return out
 }
 
-func (in *NASShareSpec) DeepCopyInto(out *NASShareSpec) {
+func (in *NASSharePrincipalSelector) DeepCopyInto(out *NASSharePrincipalSelector) {
 	*out = *in
 	if in.Users != nil {
 		out.Users = make([]string, len(in.Users))
 		copy(out.Users, in.Users)
+	}
+	if in.Groups != nil {
+		out.Groups = make([]string, len(in.Groups))
+		copy(out.Groups, in.Groups)
+	}
+}
+
+func (in *NASSharePrincipalSelector) DeepCopy() *NASSharePrincipalSelector {
+	if in == nil {
+		return nil
+	}
+	out := new(NASSharePrincipalSelector)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *NASSharePermissions) DeepCopyInto(out *NASSharePermissions) {
+	*out = *in
+	in.Allow.DeepCopyInto(&out.Allow)
+	in.ReadOnly.DeepCopyInto(&out.ReadOnly)
+}
+
+func (in *NASSharePermissions) DeepCopy() *NASSharePermissions {
+	if in == nil {
+		return nil
+	}
+	out := new(NASSharePermissions)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *NASShareSpec) DeepCopyInto(out *NASShareSpec) {
+	*out = *in
+	if in.Permissions != nil {
+		out.Permissions = new(NASSharePermissions)
+		in.Permissions.DeepCopyInto(out.Permissions)
 	}
 	if in.Options != nil {
 		out.Options = make(map[string]any, len(in.Options))

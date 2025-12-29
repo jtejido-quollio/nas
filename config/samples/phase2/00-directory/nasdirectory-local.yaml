@@ -1,0 +1,11 @@
+apiVersion: nas.io/v1alpha1
+kind: NASDirectory
+metadata:
+  name: local
+  namespace: nas-system
+spec:
+  type: local
+  local:
+    uidStart: 10000
+    gidStart: 10000
+    strategy: sequential

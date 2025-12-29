@@ -1,0 +1,32 @@
+@startuml
+title Control Plane Auth (UI/API) via External OIDC (Bring Your Own IdP)
+
+actor "Admin/User" as Human
+participant "Web UI" as UI
+participant "OIDC Provider\n(Keycloak/Zitadel/Entra/Okta)" as OIDC
+participant "nas-api" as API
+participant "Policy/RBAC\n(inside nas-api)" as RBAC
+
+Human -> UI : Open UI
+UI -> OIDC : Authorization Code Flow\n(redirect to /authorize)
+OIDC --> UI : Redirect with auth code
+UI -> OIDC : Exchange code for tokens\n(/token)
+OIDC --> UI : ID token + Access token (JWT)
+
+UI -> API : API request\nAuthorization: Bearer <access_token>
+API -> OIDC : Validate JWT (JWKS)\n+ issuer/audience checks
+OIDC --> API : JWKS / public keys
+
+API -> RBAC : Authorize request\n(claims -> roles/capabilities)
+RBAC --> API : Allow / Deny
+
+API --> UI : Response (200/403)
+
+note right of API
+No "user signup" needed.
+Optionally keep a small local
+"session/profile cache", but
+not required for auth.
+end note
+
+@enduml

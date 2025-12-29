@@ -21,6 +21,7 @@ Save as `docs/puml/01-context.puml` (already included in repo).
 - **nas-operator**: reconciles CRDs, calls node-agent, and deploys SMB services.
 - **nas-node-agent**: runs on each node (DaemonSet), performs ZFS operations on the host.
 - **NASShare**: abstract share CRD (SMB/NFS).
+- **NASDirectory**: identity source (local/LDAP/AD) referenced by NASShare policies.
 - **SMB share pods**: per NASShare (SMB), reads config from ConfigMap + creates users from Secrets.
 - **Kernel NFS exports**: per NASShare (NFS), managed via node-agent `exportfs`.
 
@@ -29,6 +30,20 @@ Save as `docs/puml/01-context.puml` (already included in repo).
 ## Data/control plane split
 - **Control plane:** CRDs + operators
 - **Data plane:** ZFS on node + SMB pods (PVC or hostPath) + kernel NFS exports
+
+## Auth domains (future, Phase 3+)
+We do **not** become an identity provider. There are two distinct auth domains:
+
+- **UI/API (control plane):** external OIDC (Keycloak/Zitadel/Entra/Okta).
+- **SMB/NFS (data plane):** AD/LDAP directory-backed identities.
+
+`NASUser`/`NASGroup` are authoritative **only** when `NASDirectory.type=local`
+(single-node appliance mode). For AD/LDAP, users live in the external
+directory and are referenced by share policy; we do not mirror them as CRDs.
+
+See:
+- `docs/puml/03-seq-auth.puml` (control plane OIDC flow)
+- `docs/puml/05-seq-data-plane-ad-shares.puml` (AD/LDAP data plane flow)
 
 ---
 

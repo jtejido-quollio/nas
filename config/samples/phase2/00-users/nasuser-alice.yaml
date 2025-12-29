@@ -5,5 +5,8 @@ metadata:
   namespace: nas-system
 spec:
   username: alice
+  directoryRef: local
+  uid: 10001
+  primaryGroup: users
   passwordSecretRef:
     name: smb-user-alice

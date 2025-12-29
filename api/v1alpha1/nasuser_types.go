@@ -8,6 +8,9 @@ import (
 // NASUserSpec defines a local NAS user backed by a Secret.
 type NASUserSpec struct {
 	Username          string            `json:"username"`
+	DirectoryRef      string            `json:"directoryRef,omitempty"`
+	UID               int64             `json:"uid,omitempty"`
+	PrimaryGroup      string            `json:"primaryGroup,omitempty"`
 	PasswordSecretRef PasswordSecretRef `json:"passwordSecretRef"`
 }
 
