@@ -6,7 +6,7 @@ metadata:
 spec:
   type: activeDirectory
   servers:
-    - ldap://192.168.1.8:389
+    - ldaps://192.168.1.8:636
   baseDN: DC=nas,DC=local
   realm: NAS.LOCAL
   workgroup: NAS

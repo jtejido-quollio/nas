@@ -480,8 +480,9 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 	}
 
 	caBundle := caBundleBytes(caSecret)
-	useTLS := len(caBundle) > 0
-	useStartTLS := dirType == "activeDirectory" && !serversHaveLDAPS(uris)
+	hasLDAPS := serversHaveLDAPS(uris)
+	useTLS := len(caBundle) > 0 || hasLDAPS
+	useStartTLS := dirType == "activeDirectory" && !hasLDAPS
 
 	lines := []string{
 		"[sssd]",
@@ -523,6 +524,10 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 		)
 	} else if useStartTLS {
 		lines = append(lines, "ldap_tls_reqcert = allow")
+	}
+	if useTLS && len(caBundle) == 0 {
+		lines = append(lines, "ldap_tls_reqcert = allow")
+		lines = filterLine(lines, "ldap_tls_cacert = /etc/sssd/certs/ca.crt")
 	}
 
 	return strings.Join(lines, "\n") + "\n", caBundle, nil
@@ -649,6 +654,17 @@ func serversHaveLDAPS(servers []string) bool {
 		}
 	}
 	return false
+}
+
+func filterLine(lines []string, drop string) []string {
+	var out []string
+	for _, line := range lines {
+		if line == drop {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func caBundleBytes(sec *corev1.Secret) []byte {
