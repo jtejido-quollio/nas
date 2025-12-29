@@ -515,7 +515,15 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 		)
 	}
 	if dirType == "activeDirectory" {
-		lines = append(lines, "ldap_referrals = False")
+		lines = append(lines,
+			"ldap_referrals = False",
+			"ldap_user_object_class = user",
+			"ldap_group_object_class = group",
+			"ldap_user_name = sAMAccountName",
+			"ldap_group_name = sAMAccountName",
+			"ldap_user_uid_number = uidNumber",
+			"ldap_group_gid_number = gidNumber",
+		)
 	}
 	if useTLS {
 		if len(caBundle) > 0 {
