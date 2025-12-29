@@ -151,6 +151,8 @@ make deploy-phase2
 ```
 Phase 2 uses NASShare resources; the Time Machine share mounts a CSI-backed PVC.
 The home share uses the ZFS dataset directly so snapshot schedules remain aligned.
+The sample Time Machine PVC size is small for labs; adjust `config/samples/phase2/25-pvc/pvc-timemachine.yaml`
+if your pool has more capacity.
 
 ## 8) Verify resources
 ```bash

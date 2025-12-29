@@ -8,5 +8,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 100Gi
+      # Keep this small for lab/demo environments; resize as needed.
+      storage: 5Gi
   storageClassName: nas-zfspv
