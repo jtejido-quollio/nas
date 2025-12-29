@@ -518,16 +518,16 @@ func renderSSSDConf(dir *nasv1.NASDirectory, dirType string, bindSecret, caSecre
 		lines = append(lines, "ldap_referrals = False")
 	}
 	if useTLS {
-		lines = append(lines,
-			"ldap_tls_reqcert = demand",
-			"ldap_tls_cacert = /etc/sssd/certs/ca.crt",
-		)
+		if len(caBundle) > 0 {
+			lines = append(lines,
+				"ldap_tls_reqcert = demand",
+				"ldap_tls_cacert = /etc/sssd/certs/ca.crt",
+			)
+		} else {
+			lines = append(lines, "ldap_tls_reqcert = allow")
+		}
 	} else if useStartTLS {
 		lines = append(lines, "ldap_tls_reqcert = allow")
-	}
-	if useTLS && len(caBundle) == 0 {
-		lines = append(lines, "ldap_tls_reqcert = allow")
-		lines = filterLine(lines, "ldap_tls_cacert = /etc/sssd/certs/ca.crt")
 	}
 
 	return strings.Join(lines, "\n") + "\n", caBundle, nil
