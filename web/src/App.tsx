@@ -296,7 +296,7 @@ export default function App() {
   const suggestedNodeName = pools[0]?.spec.nodeName ?? "";
   const diskCount = diskInventory?.count ?? diskInventory?.disks?.length ?? 0;
   const diskUpdated = diskInventory?.updated ?? "";
-  const diskSelectionEnabled = false;
+  const diskSelectionEnabled = !diskLoading && !diskError && diskInventory !== null;
 
   const { errorCount, healthLabel } = useMemo(() => {
     const badPools = pools.filter((pool) => statusTone(pool.status?.phase) === "bad");
