@@ -1528,6 +1528,13 @@ func disksFromSymlinks(pattern string, info map[string]diskInfo) []Disk {
 				disk.SizeBytes = meta.SizeBytes
 				disk.Model = meta.Model
 				disk.Rotational = meta.Rotational
+			} else if len(info) > 0 {
+				continue
+			}
+		}
+		if disk.SizeBytes == 0 {
+			if size, err := blockdevSizeBytes(m); err == nil {
+				disk.SizeBytes = size
 			}
 		}
 		out = append(out, disk)
@@ -1579,6 +1586,19 @@ func resolveDeviceName(path string) string {
 		return dev
 	}
 	return filepath.Base(targetPath)
+}
+
+func blockdevSizeBytes(path string) (int64, error) {
+	cmd := exec.Command("blockdev", "--getsize64", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
 }
 
 func splitLines(s string) []string {
