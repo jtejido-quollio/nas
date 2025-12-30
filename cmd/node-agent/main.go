@@ -1523,8 +1523,8 @@ func disksFromSymlinks(pattern string, info map[string]diskInfo) []Disk {
 		}
 		seen[base] = true
 		disk := Disk{ID: base, Path: m}
-		if target, err := filepath.EvalSymlinks(m); err == nil {
-			if meta, ok := info[filepath.Base(target)]; ok {
+		if devName := resolveDeviceName(m); devName != "" {
+			if meta, ok := info[devName]; ok {
 				disk.SizeBytes = meta.SizeBytes
 				disk.Model = meta.Model
 				disk.Rotational = meta.Rotational
@@ -1556,6 +1556,29 @@ func disksFromLsblk(info map[string]diskInfo) []Disk {
 		})
 	}
 	return out
+}
+
+func resolveDeviceName(path string) string {
+	target, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return filepath.Base(target)
+	}
+	raw, err := os.Readlink(path)
+	if err != nil {
+		return ""
+	}
+	targetPath := raw
+	if !filepath.IsAbs(raw) {
+		targetPath = filepath.Clean(filepath.Join(filepath.Dir(path), raw))
+	}
+	if idx := strings.Index(targetPath, "/block/"); idx != -1 {
+		dev := targetPath[idx+len("/block/"):]
+		if slash := strings.IndexRune(dev, '/'); slash != -1 {
+			dev = dev[:slash]
+		}
+		return dev
+	}
+	return filepath.Base(targetPath)
 }
 
 func splitLines(s string) []string {
