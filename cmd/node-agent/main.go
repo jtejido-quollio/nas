@@ -398,15 +398,16 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, ZPoolOpResponse{OK: false, Error: "poolName required"})
 			return
 		}
-		layout := strings.TrimSpace(strings.ToLower(req.VdevType))
+		layout := inferDataLayout(req)
 		var devices []string
 		for _, v := range req.Vdevs {
-			for _, d := range v.Devices {
-				devices = append(devices, d)
+			if isNonDataVdevType(v.Type) {
+				continue
 			}
+			devices = append(devices, v.Devices...)
 		}
 		if len(devices) == 0 {
-			writeJSON(w, http.StatusBadRequest, ZPoolOpResponse{OK: false, Error: "no devices provided"})
+			writeJSON(w, http.StatusBadRequest, ZPoolOpResponse{OK: false, Error: "no data devices provided"})
 			return
 		}
 		out, err := createPoolV2(ZPoolCreateRequestV2{Name: req.PoolName, Layout: layout, Devices: devices, Properties: map[string]string{"ashift": "12"}})
@@ -809,6 +810,44 @@ func normalizePoolAfterCreate(pool string) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+func normalizeVdevType(vdevType string) string {
+	vdevType = strings.ToLower(strings.TrimSpace(vdevType))
+	switch vdevType {
+	case "raidz":
+		return "raidz1"
+	case "raidz-1":
+		return "raidz1"
+	case "raidz-2":
+		return "raidz2"
+	case "raidz-3":
+		return "raidz3"
+	}
+	return vdevType
+}
+
+func isNonDataVdevType(vdevType string) bool {
+	switch normalizeVdevType(vdevType) {
+	case "log", "slog", "cache", "l2arc", "spare", "special", "dedup", "metadata":
+		return true
+	default:
+		return false
+	}
+}
+
+func inferDataLayout(req ZPoolCreateRequest) string {
+	if normalized := normalizeVdevType(req.VdevType); normalized != "" {
+		return normalized
+	}
+	for _, vdev := range req.Vdevs {
+		normalized := normalizeVdevType(vdev.Type)
+		if normalized == "" || normalized == "data" || isNonDataVdevType(normalized) {
+			continue
+		}
+		return normalized
+	}
+	return ""
 }
 
 func prepareVdevs(devs []string) ([]string, error) {
