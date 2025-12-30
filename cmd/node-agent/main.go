@@ -142,6 +142,13 @@ type PoolStatus struct {
 	Scan   string     `json:"scan,omitempty"`
 	Errors string     `json:"errors,omitempty"`
 	Vdevs  []PoolVdev `json:"vdevs,omitempty"`
+	Usage  *PoolUsage `json:"usage,omitempty"`
+}
+
+type PoolUsage struct {
+	Total     int64 `json:"total,omitempty"`
+	Used      int64 `json:"used,omitempty"`
+	Available int64 `json:"available,omitempty"`
 }
 
 type PoolVdev struct {
@@ -863,6 +870,25 @@ func listZPoolNames() ([]string, string, error) {
 	return splitLines(out), out, nil
 }
 
+func getZPoolUsage(pool string) (*PoolUsage, string, error) {
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zpool", "list", "-Hp", "-o", "size,alloc,free", pool)
+	if err != nil {
+		return nil, out, fmt.Errorf("zpool list usage failed: %w", err)
+	}
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return nil, out, fmt.Errorf("zpool list usage returned empty output")
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return nil, out, fmt.Errorf("unexpected zpool usage output: %q", line)
+	}
+	total := parseInt64(fields[0])
+	used := parseInt64(fields[1])
+	available := parseInt64(fields[2])
+	return &PoolUsage{Total: total, Used: used, Available: available}, out, nil
+}
+
 func listSnapshotNames(dataset string) ([]string, string, error) {
 	args := []string{"list", "-H", "-t", "snapshot", "-o", "name"}
 	if dataset != "" {
@@ -882,6 +908,9 @@ func getZPoolStatus(pool string) (PoolStatus, string, error) {
 	}
 	st := parseZPoolStatus(raw)
 	st.Name = pool
+	if usage, _, uerr := getZPoolUsage(pool); uerr == nil {
+		st.Usage = usage
+	}
 	return st, raw, nil
 }
 
@@ -943,6 +972,18 @@ func parseUint(s string) uint64 {
 		n = n*10 + uint64(r-'0')
 	}
 	return n
+}
+
+func parseInt64(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func isOctalMode(s string) bool {

@@ -28,8 +28,28 @@ type ZPoolVdevSpec struct {
 }
 
 type ZPoolStatus struct {
-	Phase   string `json:"phase,omitempty"`
-	Message string `json:"message,omitempty"`
+	Phase   string      `json:"phase,omitempty"`
+	Message string      `json:"message,omitempty"`
+	Usage   *ZPoolUsage `json:"usage,omitempty"`
+}
+
+type ZPoolUsage struct {
+	Total     int64 `json:"total,omitempty"`
+	Used      int64 `json:"used,omitempty"`
+	Available int64 `json:"available,omitempty"`
+}
+
+func (in *ZPoolUsage) DeepCopyInto(out *ZPoolUsage) {
+	*out = *in
+}
+
+func (in *ZPoolUsage) DeepCopy() *ZPoolUsage {
+	if in == nil {
+		return nil
+	}
+	out := new(ZPoolUsage)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // +kubebuilder:object:root=true
@@ -90,7 +110,11 @@ func (in *ZPool) DeepCopyInto(out *ZPool) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
-	out.Status = in.Status
+	out.Status.Phase = in.Status.Phase
+	out.Status.Message = in.Status.Message
+	if in.Status.Usage != nil {
+		out.Status.Usage = in.Status.Usage.DeepCopy()
+	}
 }
 
 func (in *ZPool) DeepCopy() *ZPool {

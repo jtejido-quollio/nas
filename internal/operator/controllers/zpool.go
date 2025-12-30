@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	nasv1 "mnemosyne/api/v1alpha1"
@@ -49,6 +50,19 @@ func (r *ZPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			obj.Status.Message = err.Error()
 			_ = r.Status().Update(ctx, &obj)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
+	var statusResp struct {
+		OK   bool `json:"ok"`
+		Pool *struct {
+			Usage *nasv1.ZPoolUsage `json:"usage,omitempty"`
+		} `json:"pool,omitempty"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := na.do(ctx, "GET", "/v1/zfs/zpools/status?name="+url.QueryEscape(poolName), nil, &statusResp, nil); err == nil {
+		if statusResp.Pool != nil && statusResp.Pool.Usage != nil {
+			obj.Status.Usage = statusResp.Pool.Usage
 		}
 	}
 

@@ -1034,6 +1034,12 @@ export default function App() {
                     cacheVdevs.length > 0 ? `${cacheVdevs.length} vdev${cacheVdevs.length > 1 ? "s" : ""}` : "None";
                   const spareSummary =
                     spareVdevs.length > 0 ? `${spareVdevs.length} vdev${spareVdevs.length > 1 ? "s" : ""}` : "None";
+                  const usage = pool.status?.usage;
+                  const usageTotal = usage?.total ?? 0;
+                  const usageUsed = usage?.used ?? 0;
+                  const usageAvailable = usage?.available ?? 0;
+                  const hasUsage = usageTotal > 0;
+                  const usagePct = hasUsage ? Math.max(0, Math.min(100, Math.round((usageUsed / usageTotal) * 100))) : 0;
 
                   return (
                     <div key={pool.metadata.name} className="pool-card">
@@ -1079,23 +1085,38 @@ export default function App() {
                         <div className="pool-panel">
                           <div className="pool-panel-title">Usage</div>
                           <div className="usage-meter">
-                            <div className="usage-value">N/A</div>
-                            <div className="usage-sub">Usage telemetry pending</div>
+                            {hasUsage ? (
+                              <>
+                                <div className="usage-value">{usagePct}%</div>
+                                <div className="usage-sub">{formatGiB(usageUsed)} used</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="usage-value">Pending</div>
+                                <div className="usage-sub">Usage telemetry not reported yet.</div>
+                              </>
+                            )}
                           </div>
-                          <div className="usage-list">
-                            <div>
-                              <span>Usable capacity</span>
-                              <strong>N/A</strong>
+                          {hasUsage ? (
+                            <div className="usage-list">
+                              <div>
+                                <span>Usable capacity</span>
+                                <strong>{formatGiB(usageTotal)}</strong>
+                              </div>
+                              <div>
+                                <span>Used</span>
+                                <strong>{formatGiB(usageUsed)}</strong>
+                              </div>
+                              <div>
+                                <span>Available</span>
+                                <strong>{formatGiB(usageAvailable)}</strong>
+                              </div>
                             </div>
-                            <div>
-                              <span>Used</span>
-                              <strong>N/A</strong>
+                          ) : (
+                            <div className="usage-empty">
+                              No usage metrics yet. Run sync once node-agent reports pool telemetry.
                             </div>
-                            <div>
-                              <span>Available</span>
-                              <strong>N/A</strong>
-                            </div>
-                          </div>
+                          )}
                         </div>
 
                         <div className="pool-panel">

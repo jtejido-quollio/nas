@@ -5,7 +5,11 @@ export type ZPool = {
     poolName?: string;
     vdevs?: Array<{ type?: string; devices?: string[] }>;
   };
-  status?: { phase?: string; message?: string };
+  status?: {
+    phase?: string;
+    message?: string;
+    usage?: { total?: number; used?: number; available?: number };
+  };
 };
 
 export type ZDataset = {

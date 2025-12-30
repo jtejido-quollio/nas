@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,13 +23,13 @@ import (
 )
 
 type Server struct {
-	client        client.Client
-	namespace     string
-	webRoot       string
-	nodeAgentURL  string
-	httpClient    *http.Client
-	logger        *log.Logger
-	mux           *http.ServeMux
+	client       client.Client
+	namespace    string
+	webRoot      string
+	nodeAgentURL string
+	httpClient   *http.Client
+	logger       *log.Logger
+	mux          *http.ServeMux
 }
 
 type apiError struct {
@@ -36,9 +37,9 @@ type apiError struct {
 }
 
 type overviewResponse struct {
-	Pools       []nasv1.ZPool       `json:"pools"`
-	Datasets    []nasv1.ZDataset    `json:"datasets"`
-	Shares      []nasv1.NASShare    `json:"shares"`
+	Pools       []nasv1.ZPool        `json:"pools"`
+	Datasets    []nasv1.ZDataset     `json:"datasets"`
+	Shares      []nasv1.NASShare     `json:"shares"`
 	Directories []nasv1.NASDirectory `json:"directories"`
 }
 
@@ -57,6 +58,18 @@ type nodeAgentDisksResponse struct {
 type nodeAgentDisksUpdatedResponse struct {
 	Updated string `json:"updated"`
 	Count   int    `json:"count"`
+}
+
+type nodeAgentZPoolStatusResponse struct {
+	OK    bool                   `json:"ok"`
+	Pool  *nodeAgentZPoolStatus  `json:"pool,omitempty"`
+	Pools []nodeAgentZPoolStatus `json:"pools,omitempty"`
+	Error string                 `json:"error,omitempty"`
+}
+
+type nodeAgentZPoolStatus struct {
+	Name  string            `json:"name"`
+	Usage *nasv1.ZPoolUsage `json:"usage,omitempty"`
 }
 
 type diskInventoryResponse struct {
@@ -170,6 +183,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.enrichZPoolUsage(ctx, pools.Items)
+
 	resp := overviewResponse{
 		Pools:       pools.Items,
 		Datasets:    datasets.Items,
@@ -226,6 +241,7 @@ func (s *Server) handleZPools(w http.ResponseWriter, r *http.Request) {
 		if err := s.client.List(ctx, &list, client.InNamespace(ns)); err != nil {
 			return nil, err
 		}
+		s.enrichZPoolUsage(ctx, list.Items)
 		return list.Items, nil
 	}, func(ctx context.Context, req createRequest[nasv1.ZPoolSpec]) (any, error) {
 		obj := nasv1.ZPool{
@@ -246,6 +262,7 @@ func (s *Server) handleZPool(w http.ResponseWriter, r *http.Request) {
 		if err := s.client.Get(ctx, namespacedName(s.namespace, name), &obj); err != nil {
 			return nil, err
 		}
+		s.enrichZPoolUsageForPool(ctx, &obj)
 		return obj, nil
 	}, func(ctx context.Context, name string) error {
 		obj := &nasv1.ZPool{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.namespace}}
@@ -553,6 +570,52 @@ func upsertResource(ctx context.Context, c client.Client, obj client.Object) err
 	}
 	obj.SetResourceVersion(current.GetResourceVersion())
 	return c.Update(ctx, obj)
+}
+
+func (s *Server) enrichZPoolUsage(ctx context.Context, pools []nasv1.ZPool) {
+	if s.nodeAgentURL == "" || len(pools) == 0 {
+		return
+	}
+	var status nodeAgentZPoolStatusResponse
+	if err := s.fetchNodeAgentJSON(ctx, "/v1/zfs/zpools/status", &status); err != nil || !status.OK {
+		return
+	}
+	usageByName := make(map[string]*nasv1.ZPoolUsage, len(status.Pools))
+	for _, pool := range status.Pools {
+		if pool.Usage == nil || pool.Name == "" {
+			continue
+		}
+		usageByName[pool.Name] = pool.Usage
+	}
+	for i := range pools {
+		name := pools[i].Spec.PoolName
+		if name == "" {
+			name = pools[i].Name
+		}
+		if usage, ok := usageByName[name]; ok {
+			pools[i].Status.Usage = usage
+		}
+	}
+}
+
+func (s *Server) enrichZPoolUsageForPool(ctx context.Context, pool *nasv1.ZPool) {
+	if s.nodeAgentURL == "" || pool == nil {
+		return
+	}
+	name := pool.Spec.PoolName
+	if name == "" {
+		name = pool.Name
+	}
+	if name == "" {
+		return
+	}
+	var status nodeAgentZPoolStatusResponse
+	if err := s.fetchNodeAgentJSON(ctx, "/v1/zfs/zpools/status?name="+url.QueryEscape(name), &status); err != nil || !status.OK {
+		return
+	}
+	if status.Pool != nil && status.Pool.Usage != nil {
+		pool.Status.Usage = status.Pool.Usage
+	}
 }
 
 func (s *Server) fetchNodeAgentJSON(ctx context.Context, path string, out any) error {

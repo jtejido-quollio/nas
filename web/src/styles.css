@@ -656,6 +656,13 @@ body {
   color: var(--ink);
 }
 
+.usage-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px 0;
+}
+
 .disk-empty {
   border-radius: 16px;
   background: rgba(236, 245, 251, 0.6);

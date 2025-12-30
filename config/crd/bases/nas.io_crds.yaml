@@ -41,6 +41,12 @@ spec:
                 observedGeneration: {type: integer, format: int64}
                 phase: {type: string}
                 message: {type: string}
+                usage:
+                  type: object
+                  properties:
+                    total: {type: integer, format: int64}
+                    used: {type: integer, format: int64}
+                    available: {type: integer, format: int64}
                 conditions:
                   type: array
                   items:
