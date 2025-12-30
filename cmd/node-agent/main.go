@@ -871,22 +871,34 @@ func listZPoolNames() ([]string, string, error) {
 }
 
 func getZPoolUsage(pool string) (*PoolUsage, string, error) {
-	out, err := runCmdCombined(context.Background(), 30*time.Second, "zpool", "list", "-Hp", "-o", "size,alloc,free", pool)
-	if err != nil {
-		return nil, out, fmt.Errorf("zpool list usage failed: %w", err)
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "list", "-Hp", "-o", "used,available", pool)
+	if err == nil {
+		line := strings.TrimSpace(out)
+		if line != "" {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				used := parseInt64(fields[0])
+				available := parseInt64(fields[1])
+				return &PoolUsage{Total: used + available, Used: used, Available: available}, out, nil
+			}
+		}
 	}
-	line := strings.TrimSpace(out)
+	out2, err2 := runCmdCombined(context.Background(), 30*time.Second, "zpool", "list", "-Hp", "-o", "size,alloc,free", pool)
+	if err2 != nil {
+		return nil, out2, fmt.Errorf("zpool list usage failed: %w", err2)
+	}
+	line := strings.TrimSpace(out2)
 	if line == "" {
-		return nil, out, fmt.Errorf("zpool list usage returned empty output")
+		return nil, out2, fmt.Errorf("zpool list usage returned empty output")
 	}
 	fields := strings.Fields(line)
 	if len(fields) < 3 {
-		return nil, out, fmt.Errorf("unexpected zpool usage output: %q", line)
+		return nil, out2, fmt.Errorf("unexpected zpool usage output: %q", line)
 	}
 	total := parseInt64(fields[0])
 	used := parseInt64(fields[1])
 	available := parseInt64(fields[2])
-	return &PoolUsage{Total: total, Used: used, Available: available}, out, nil
+	return &PoolUsage{Total: total, Used: used, Available: available}, out2, nil
 }
 
 func listSnapshotNames(dataset string) ([]string, string, error) {
