@@ -43,8 +43,11 @@ type overviewResponse struct {
 }
 
 type nodeAgentDisk struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Rotational *bool  `json:"rotational,omitempty"`
 }
 
 type nodeAgentDisksResponse struct {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,8 +24,11 @@ import (
 // -----------------
 
 type Disk struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Rotational *bool  `json:"rotational,omitempty"`
 }
 
 type DiskList struct {
@@ -1446,25 +1450,64 @@ type lsblkJSON struct {
 }
 
 type lsblkDev struct {
-	Name     string     `json:"name"`
-	Type     string     `json:"type"`
-	Children []lsblkDev `json:"children,omitempty"`
+	Name      string     `json:"name"`
+	Type      string     `json:"type"`
+	SizeBytes int64      `json:"size"`
+	Rota      *int       `json:"rota,omitempty"`
+	Model     string     `json:"model,omitempty"`
+	Children  []lsblkDev `json:"children,omitempty"`
 }
 
 func discoverDisks() []Disk {
-	if ds := disksFromSymlinks("/dev/disk/by-id/*"); len(ds) > 0 {
+	info := lsblkInfo()
+	if ds := disksFromSymlinks("/dev/disk/by-id/*", info); len(ds) > 0 {
 		return ds
 	}
-	if ds := disksFromSymlinks("/dev/disk/by-path/*"); len(ds) > 0 {
+	if ds := disksFromSymlinks("/dev/disk/by-path/*", info); len(ds) > 0 {
 		return ds
 	}
-	if ds := disksFromLsblk(); len(ds) > 0 {
+	if ds := disksFromLsblk(info); len(ds) > 0 {
 		return ds
 	}
 	return []Disk{}
 }
 
-func disksFromSymlinks(pattern string) []Disk {
+type diskInfo struct {
+	SizeBytes  int64
+	Model      string
+	Rotational *bool
+}
+
+func lsblkInfo() map[string]diskInfo {
+	cmd := exec.Command("lsblk", "-b", "-J", "-o", "NAME,TYPE,SIZE,ROTA,MODEL")
+	b, err := cmd.Output()
+	if err != nil {
+		return map[string]diskInfo{}
+	}
+	var parsed lsblkJSON
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		return map[string]diskInfo{}
+	}
+	info := make(map[string]diskInfo)
+	for _, dev := range parsed.Blockdevices {
+		if dev.Type != "disk" || dev.Name == "" {
+			continue
+		}
+		var rotational *bool
+		if dev.Rota != nil {
+			val := *dev.Rota == 1
+			rotational = &val
+		}
+		info[dev.Name] = diskInfo{
+			SizeBytes:  dev.SizeBytes,
+			Model:      strings.TrimSpace(dev.Model),
+			Rotational: rotational,
+		}
+	}
+	return info
+}
+
+func disksFromSymlinks(pattern string, info map[string]diskInfo) []Disk {
 	matches, _ := filepath.Glob(pattern)
 	seen := map[string]bool{}
 	out := make([]Disk, 0, len(matches))
@@ -1479,27 +1522,38 @@ func disksFromSymlinks(pattern string) []Disk {
 			continue
 		}
 		seen[base] = true
-		out = append(out, Disk{ID: base, Path: m})
+		disk := Disk{ID: base, Path: m}
+		if target, err := filepath.EvalSymlinks(m); err == nil {
+			if meta, ok := info[filepath.Base(target)]; ok {
+				disk.SizeBytes = meta.SizeBytes
+				disk.Model = meta.Model
+				disk.Rotational = meta.Rotational
+			}
+		}
+		out = append(out, disk)
 	}
 	return out
 }
 
-func disksFromLsblk() []Disk {
-	cmd := exec.Command("lsblk", "-J", "-o", "NAME,TYPE")
-	b, err := cmd.Output()
-	if err != nil {
+func disksFromLsblk(info map[string]diskInfo) []Disk {
+	if len(info) == 0 {
 		return []Disk{}
 	}
-	var parsed lsblkJSON
-	if err := json.Unmarshal(b, &parsed); err != nil {
-		return []Disk{}
+	names := make([]string, 0, len(info))
+	for name := range info {
+		names = append(names, name)
 	}
-	var out []Disk
-	for _, dev := range parsed.Blockdevices {
-		if dev.Type != "disk" || dev.Name == "" {
-			continue
-		}
-		out = append(out, Disk{ID: dev.Name, Path: "/dev/" + dev.Name})
+	sort.Strings(names)
+	out := make([]Disk, 0, len(names))
+	for _, name := range names {
+		meta := info[name]
+		out = append(out, Disk{
+			ID:         name,
+			Path:       "/dev/" + name,
+			SizeBytes:  meta.SizeBytes,
+			Model:      meta.Model,
+			Rotational: meta.Rotational,
+		})
 	}
 	return out
 }

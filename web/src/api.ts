@@ -47,6 +47,9 @@ export type ZSnapshot = {
 export type DiskInfo = {
   id: string;
   path: string;
+  sizeBytes?: number;
+  model?: string;
+  rotational?: boolean;
 };
 
 export type DiskInventory = {

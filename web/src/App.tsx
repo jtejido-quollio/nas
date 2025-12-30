@@ -40,6 +40,11 @@ type PoolWizardState = {
   nodeName: string;
   encryption: boolean;
   layout: "stripe" | "mirror" | "raidz1" | "raidz2" | "raidz3" | "draid1" | "draid2" | "draid3";
+  selectionMode: "auto" | "manual";
+  autoDiskSize: string;
+  autoDiskMin: boolean;
+  autoWidth: string;
+  autoVdevs: string;
   dataDevices: string;
   logDevices: string;
   cacheDevices: string;
@@ -197,7 +202,18 @@ function minDevicesForLayout(layout: PoolWizardState["layout"]) {
   }
 }
 
-function validatePoolWizardStep(state: PoolWizardState, step: number) {
+function formatGiB(bytes: number) {
+  const gib = bytes / (1024 ** 3);
+  return `${Math.round(gib)} GiB`;
+}
+
+function validatePoolWizardStep(
+  state: PoolWizardState,
+  step: number,
+  selectionMode: "auto" | "manual",
+  autoDevices: string[],
+  autoError?: string
+) {
   if (step === 0) {
     const name = state.name.trim();
     if (name.length === 0) return "Pool name is required.";
@@ -213,8 +229,15 @@ function validatePoolWizardStep(state: PoolWizardState, step: number) {
       return "dRAID layouts are not yet available. Select Stripe, Mirror, or RAIDZ.";
     }
     if (!state.layout) return "Select a data layout to continue.";
-    const dataDevices = parseDeviceList(state.dataDevices);
     const minDevices = minDevicesForLayout(state.layout);
+    if (selectionMode === "auto") {
+      if (autoError) return autoError;
+      if (autoDevices.length < minDevices) {
+        return `Layout ${layoutLabel(state.layout)} needs at least ${minDevices} disk(s).`;
+      }
+      return null;
+    }
+    const dataDevices = parseDeviceList(state.dataDevices);
     if (dataDevices.length < minDevices) {
       return `Layout ${layoutLabel(state.layout)} needs at least ${minDevices} disk(s).`;
     }
@@ -367,6 +390,11 @@ export default function App() {
       nodeName: suggestedNodeName,
       encryption: false,
       layout: "mirror",
+      selectionMode: "manual",
+      autoDiskSize: "",
+      autoDiskMin: false,
+      autoWidth: "",
+      autoVdevs: "",
       dataDevices: "",
       logDevices: "",
       cacheDevices: "",
@@ -386,10 +414,89 @@ export default function App() {
     }
   };
 
+  const effectiveSelectionMode = poolWizard
+    ? isDraidLayout(poolWizard.layout)
+      ? "auto"
+      : poolWizard.selectionMode
+    : "manual";
+
+  const autoSelection = useMemo(() => {
+    if (!poolWizard || !diskSelectionEnabled || !diskInventory) {
+      return {
+        sizes: [] as Array<{ bytes: number; label: string; count: number }>,
+        eligibleCount: 0,
+        devices: [] as string[],
+        error: "Disk inventory not available."
+      };
+    }
+    const disksWithSize = diskInventory.disks.filter(
+      (disk) => typeof disk.sizeBytes === "number" && disk.sizeBytes > 0
+    );
+    if (disksWithSize.length === 0) {
+      return {
+        sizes: [] as Array<{ bytes: number; label: string; count: number }>,
+        eligibleCount: 0,
+        devices: [] as string[],
+        error: "Disk size metadata not available yet."
+      };
+    }
+    const sizeMap = new Map<number, number>();
+    for (const disk of disksWithSize) {
+      const sizeBytes = disk.sizeBytes ?? 0;
+      sizeMap.set(sizeBytes, (sizeMap.get(sizeBytes) ?? 0) + 1);
+    }
+    const sizes = Array.from(sizeMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([bytes, count]) => ({
+        bytes,
+        count,
+        label: `${formatGiB(bytes)} (${count})`
+      }));
+
+    const selectedSize = Number(poolWizard.autoDiskSize);
+    if (!selectedSize) {
+      return { sizes, eligibleCount: 0, devices: [], error: "Select a disk size to continue." };
+    }
+    const eligible = disksWithSize.filter((disk) => {
+      if (poolWizard.autoDiskMin) {
+        return (disk.sizeBytes ?? 0) >= selectedSize;
+      }
+      return (disk.sizeBytes ?? 0) === selectedSize;
+    });
+    if (eligible.length === 0) {
+      return { sizes, eligibleCount: 0, devices: [], error: "No disks match the selected size." };
+    }
+    const width = Number(poolWizard.autoWidth);
+    if (!width) {
+      return { sizes, eligibleCount: eligible.length, devices: [], error: "Select a width to continue." };
+    }
+    const vdevs = Number(poolWizard.autoVdevs);
+    if (!vdevs) {
+      return { sizes, eligibleCount: eligible.length, devices: [], error: "Select number of VDEVs to continue." };
+    }
+    const required = width * vdevs;
+    if (eligible.length < required) {
+      return {
+        sizes,
+        eligibleCount: eligible.length,
+        devices: [],
+        error: `Need ${required} disks but only ${eligible.length} match the selection.`
+      };
+    }
+    const devices = eligible.slice(0, required).map((disk) => disk.path);
+    return { sizes, eligibleCount: eligible.length, devices, error: "" };
+  }, [poolWizard, diskSelectionEnabled, diskInventory]);
+
   const handlePoolWizardStep = (direction: "next" | "back") => {
     if (!poolWizard) return;
     if (direction === "next") {
-      const message = validatePoolWizardStep(poolWizard, poolWizard.step);
+      const message = validatePoolWizardStep(
+        poolWizard,
+        poolWizard.step,
+        effectiveSelectionMode,
+        autoSelection.devices,
+        autoSelection.error
+      );
       if (message) {
         setPoolWizardError(message);
         return;
@@ -418,10 +525,15 @@ export default function App() {
       setPoolWizardError("Node name is required for single-node pools.");
       return;
     }
-    const dataDevices = parseDeviceList(poolWizard.dataDevices);
+    const dataDevices =
+      effectiveSelectionMode === "auto" ? autoSelection.devices : parseDeviceList(poolWizard.dataDevices);
     const minDevices = minDevicesForLayout(poolWizard.layout);
     if (dataDevices.length < minDevices) {
-      setPoolWizardError(`Layout ${layoutLabel(poolWizard.layout)} needs at least ${minDevices} disk(s).`);
+      const message =
+        effectiveSelectionMode === "auto"
+          ? autoSelection.error || `Layout ${layoutLabel(poolWizard.layout)} needs at least ${minDevices} disk(s).`
+          : `Layout ${layoutLabel(poolWizard.layout)} needs at least ${minDevices} disk(s).`;
+      setPoolWizardError(message);
       return;
     }
     const vdevs: ZPool["spec"]["vdevs"] = [{ type: poolWizard.layout, devices: dataDevices }];
@@ -535,9 +647,31 @@ export default function App() {
 
   const busy = loading || snapshotsLoading || actionBusy;
   const view = viewMeta[activeView];
+  const autoSelectionReady = diskSelectionEnabled && autoSelection.sizes.length > 0;
+  const autoWidthOptions = useMemo(() => {
+    if (!poolWizard || !autoSelectionReady) return [];
+    const minWidth = minDevicesForLayout(poolWizard.layout);
+    const maxWidth = autoSelection.eligibleCount;
+    const options: number[] = [];
+    for (let i = minWidth; i <= maxWidth; i += 1) {
+      options.push(i);
+    }
+    return options;
+  }, [poolWizard, autoSelectionReady, autoSelection.eligibleCount]);
+  const autoVdevOptions = useMemo(() => {
+    if (!poolWizard || !autoSelectionReady) return [];
+    const width = Number(poolWizard.autoWidth);
+    if (!width) return [];
+    const maxVdevs = Math.floor(autoSelection.eligibleCount / width);
+    return Array.from({ length: maxVdevs }, (_, index) => index + 1);
+  }, [poolWizard, autoSelectionReady, autoSelection.eligibleCount]);
+  const showAutoSelection = !!poolWizard && effectiveSelectionMode === "auto";
+  const showManualSelection = !!poolWizard && !isDraidLayout(poolWizard.layout) && effectiveSelectionMode === "manual";
+  const showDraidSettings = !!poolWizard && isDraidLayout(poolWizard.layout);
   const poolWizardSpec = useMemo(() => {
     if (!poolWizard) return null;
-    const dataDevices = parseDeviceList(poolWizard.dataDevices);
+    const dataDevices =
+      effectiveSelectionMode === "auto" ? autoSelection.devices : parseDeviceList(poolWizard.dataDevices);
     const logDevices = parseDeviceList(poolWizard.logDevices);
     const cacheDevices = parseDeviceList(poolWizard.cacheDevices);
     const spareDevices = parseDeviceList(poolWizard.spareDevices);
@@ -553,7 +687,7 @@ export default function App() {
       poolName: poolWizard.name.trim(),
       vdevs
     };
-  }, [poolWizard]);
+  }, [poolWizard, effectiveSelectionMode, autoSelection]);
 
   return (
     <div className="app">
@@ -1297,9 +1431,13 @@ export default function App() {
                       </span>
                       <select
                         value={poolWizard.layout}
-                        onChange={(event) =>
-                          updatePoolWizard({ layout: event.target.value as PoolWizardState["layout"] })
-                        }
+                        onChange={(event) => {
+                          const nextLayout = event.target.value as PoolWizardState["layout"];
+                          updatePoolWizard({
+                            layout: nextLayout,
+                            selectionMode: isDraidLayout(nextLayout) ? "auto" : poolWizard.selectionMode
+                          });
+                        }}
                       >
                         <option value="stripe">Stripe</option>
                         <option value="mirror">Mirror</option>
@@ -1312,11 +1450,38 @@ export default function App() {
                       </select>
                     </label>
 
+                    <div className="wizard-toggle">
+                      <button
+                        className={`toggle-button ${showAutoSelection ? "active" : ""}`}
+                        onClick={() => updatePoolWizard({ selectionMode: "auto" })}
+                        disabled={!autoSelectionReady}
+                      >
+                        Automated
+                      </button>
+                      <button
+                        className={`toggle-button ${showManualSelection ? "active" : ""}`}
+                        onClick={() => updatePoolWizard({ selectionMode: "manual" })}
+                        disabled={isDraidLayout(poolWizard.layout)}
+                      >
+                        Manual
+                      </button>
+                      {!autoSelectionReady && (
+                        <span className="wizard-toggle-note">
+                          Automated selection needs disk inventory with size metadata.
+                        </span>
+                      )}
+                      {isDraidLayout(poolWizard.layout) && (
+                        <span className="wizard-toggle-note">Manual selection is disabled for dRAID layouts.</span>
+                      )}
+                    </div>
+
                     <div className="wizard-grid">
-                      <div className="wizard-card muted">
+                      <div className={`wizard-card${showAutoSelection && autoSelectionReady ? "" : " muted"}`}>
                         <div className="wizard-card-title">Automated Disk Selection</div>
                         <p className="wizard-card-sub">
-                          Not yet available. Disk inventory sync is required to enable automated selection.
+                          {autoSelectionReady
+                            ? "Select disk size, width, and VDEV count to auto-assign disks."
+                            : "Disk inventory sync is required to enable automated selection."}
                         </p>
                         <label className="form-field">
                           <span className="field-label">
@@ -1325,7 +1490,32 @@ export default function App() {
                               ?
                             </span>
                           </span>
-                          <input type="text" value="Not yet available" disabled />
+                          <select
+                            value={poolWizard.autoDiskSize}
+                            onChange={(event) => updatePoolWizard({ autoDiskSize: event.target.value })}
+                            disabled={!autoSelectionReady || !showAutoSelection}
+                          >
+                            <option value="">Select size</option>
+                            {autoSelection.sizes.map((size) => (
+                              <option key={size.bytes} value={String(size.bytes)}>
+                                {size.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="checkbox-field">
+                          <input
+                            type="checkbox"
+                            checked={poolWizard.autoDiskMin}
+                            onChange={(event) => updatePoolWizard({ autoDiskMin: event.target.checked })}
+                            disabled={!autoSelectionReady || !showAutoSelection}
+                          />
+                          <span className="field-label">
+                            Treat disk size as minimum
+                            <span className="field-help" title="Include disks larger than the selected size.">
+                              ?
+                            </span>
+                          </span>
                         </label>
                         <label className="form-field">
                           <span className="field-label">
@@ -1334,7 +1524,18 @@ export default function App() {
                               ?
                             </span>
                           </span>
-                          <input type="text" value="Not yet available" disabled />
+                          <select
+                            value={poolWizard.autoWidth}
+                            onChange={(event) => updatePoolWizard({ autoWidth: event.target.value })}
+                            disabled={!autoSelectionReady || !showAutoSelection || autoWidthOptions.length === 0}
+                          >
+                            <option value="">Select width</option>
+                            {autoWidthOptions.map((width) => (
+                              <option key={width} value={String(width)}>
+                                {width}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                         <label className="form-field">
                           <span className="field-label">
@@ -1343,10 +1544,29 @@ export default function App() {
                               ?
                             </span>
                           </span>
-                          <input type="text" value="Not yet available" disabled />
+                          <select
+                            value={poolWizard.autoVdevs}
+                            onChange={(event) => updatePoolWizard({ autoVdevs: event.target.value })}
+                            disabled={!autoSelectionReady || !showAutoSelection || autoVdevOptions.length === 0}
+                          >
+                            <option value="">Select VDEVs</option>
+                            {autoVdevOptions.map((count) => (
+                              <option key={count} value={String(count)}>
+                                {count}
+                              </option>
+                            ))}
+                          </select>
                         </label>
+                        {showAutoSelection && autoSelection.devices.length > 0 && (
+                          <div className="wizard-inline">
+                            Auto-selected {autoSelection.devices.length} disks.
+                          </div>
+                        )}
+                        {showAutoSelection && autoSelection.error && (
+                          <div className="wizard-inline warn">{autoSelection.error}</div>
+                        )}
                       </div>
-                      {!isDraidLayout(poolWizard.layout) && (
+                      {showManualSelection && (
                         <div className="wizard-card">
                           <div className="wizard-card-title">Manual Disk Selection</div>
                           <p className="wizard-card-sub">
@@ -1368,7 +1588,7 @@ export default function App() {
                           </label>
                         </div>
                       )}
-                      {isDraidLayout(poolWizard.layout) && (
+                      {showDraidSettings && (
                         <div className="wizard-card muted">
                           <div className="wizard-card-title">dRAID Settings</div>
                           <p className="wizard-card-sub">
@@ -1497,7 +1717,11 @@ export default function App() {
                       </div>
                       <div>
                         <div className="review-label">Data disks</div>
-                        <div className="review-value">{parseDeviceList(poolWizard.dataDevices).length}</div>
+                        <div className="review-value">
+                          {effectiveSelectionMode === "auto"
+                            ? autoSelection.devices.length
+                            : parseDeviceList(poolWizard.dataDevices).length}
+                        </div>
                       </div>
                     </div>
                     <div className="review-code">
