@@ -652,8 +652,16 @@ body {
   color: var(--muted);
 }
 
+.usage-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .usage-list strong {
   color: var(--ink);
+  text-align: right;
 }
 
 .usage-empty {
