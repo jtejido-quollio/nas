@@ -32,6 +32,18 @@ type ModalState = {
   specJson: string;
 };
 
+type PoolWizardState = {
+  step: number;
+  name: string;
+  nodeName: string;
+  encryption: boolean;
+  layout: "stripe" | "mirror" | "raidz1" | "raidz2";
+  dataDevices: string;
+  logDevices: string;
+  cacheDevices: string;
+  spareDevices: string;
+};
+
 type Column<T> = {
   label: string;
   render: (item: T) => ReactNode;
@@ -39,7 +51,7 @@ type Column<T> = {
 
 const navItems: Array<{ id: ViewId; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
-  { id: "pools", label: "Pools" },
+  { id: "pools", label: "Storage" },
   { id: "datasets", label: "Datasets" },
   { id: "shares", label: "Shares" },
   { id: "directories", label: "Directories" },
@@ -52,8 +64,8 @@ const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
     subtitle: "Unified view of pools, datasets, shares, and directories across the NAS control plane."
   },
   pools: {
-    title: "Pools",
-    subtitle: "Create, edit, and remove ZFS pools."
+    title: "Storage",
+    subtitle: "Provision pools, review topology, and manage disk capacity."
   },
   datasets: {
     title: "Datasets",
@@ -104,6 +116,15 @@ const defaultSpecByKind: Record<ModalKind, object> = {
   }
 };
 
+const poolWizardSteps = [
+  "General Info",
+  "Data",
+  "Log (Optional)",
+  "Cache (Optional)",
+  "Spare (Optional)",
+  "Review"
+];
+
 function getStatus(phase?: string) {
   if (!phase) return "unknown";
   return phase.toLowerCase();
@@ -120,6 +141,44 @@ function directoryConnectivity(directory: NASDirectory) {
   const condition = directory.status?.conditions?.find((c) => c.type === "Connectivity");
   if (!condition) return "defined";
   return condition.status === "True" ? "connected" : "offline";
+}
+
+const dataLayouts = new Set(["stripe", "mirror", "raidz1", "raidz2"]);
+
+function layoutLabel(layout?: string) {
+  const normalized = layout?.toLowerCase() ?? "stripe";
+  switch (normalized) {
+    case "mirror":
+      return "Mirror";
+    case "raidz1":
+      return "RAIDZ1";
+    case "raidz2":
+      return "RAIDZ2";
+    case "stripe":
+    default:
+      return "Stripe";
+  }
+}
+
+function parseDeviceList(value: string) {
+  return value
+    .split(/[\s,]+/)
+    .map((device) => device.trim())
+    .filter((device) => device.length > 0);
+}
+
+function minDevicesForLayout(layout: PoolWizardState["layout"]) {
+  switch (layout) {
+    case "mirror":
+      return 2;
+    case "raidz1":
+      return 3;
+    case "raidz2":
+      return 4;
+    case "stripe":
+    default:
+      return 1;
+  }
 }
 
 function ResourceTable<T extends { metadata: { name: string } }>(props: {
@@ -181,6 +240,9 @@ export default function App() {
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [modal, setModal] = useState<ModalState | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [poolWizard, setPoolWizard] = useState<PoolWizardState | null>(null);
+  const [poolWizardError, setPoolWizardError] = useState<string | null>(null);
+  const [disksModalOpen, setDisksModalOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
   const refreshAll = useCallback(async () => {
@@ -208,6 +270,7 @@ export default function App() {
   const datasets = overview?.datasets ?? [];
   const shares = overview?.shares ?? [];
   const directories = overview?.directories ?? [];
+  const suggestedNodeName = pools[0]?.spec.nodeName ?? "";
 
   const { errorCount, healthLabel } = useMemo(() => {
     const badPools = pools.filter((pool) => statusTone(pool.status?.phase) === "bad");
@@ -229,6 +292,82 @@ export default function App() {
       name: "",
       specJson: JSON.stringify(defaultSpecByKind[kind], null, 2)
     });
+  };
+
+  const openPoolWizard = () => {
+    setPoolWizardError(null);
+    setPoolWizard({
+      step: 0,
+      name: "",
+      nodeName: suggestedNodeName,
+      encryption: false,
+      layout: "mirror",
+      dataDevices: "",
+      logDevices: "",
+      cacheDevices: "",
+      spareDevices: ""
+    });
+  };
+
+  const closePoolWizard = () => {
+    setPoolWizard(null);
+    setPoolWizardError(null);
+  };
+
+  const updatePoolWizard = (changes: Partial<PoolWizardState>) => {
+    setPoolWizard((current) => (current ? { ...current, ...changes } : current));
+  };
+
+  const handlePoolWizardStep = (direction: "next" | "back") => {
+    if (!poolWizard) return;
+    const step = direction === "next" ? poolWizard.step + 1 : poolWizard.step - 1;
+    updatePoolWizard({ step: Math.min(Math.max(step, 0), poolWizardSteps.length - 1) });
+  };
+
+  const handlePoolWizardCreate = async () => {
+    if (!poolWizard) return;
+    const name = poolWizard.name.trim();
+    if (name.length === 0) {
+      setPoolWizardError("Pool name is required.");
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9-]{0,49}$/.test(name)) {
+      setPoolWizardError("Pool name must be lowercase, up to 50 chars, and may include dashes.");
+      return;
+    }
+    if (poolWizard.nodeName.trim() === "") {
+      setPoolWizardError("Node name is required for single-node pools.");
+      return;
+    }
+    const dataDevices = parseDeviceList(poolWizard.dataDevices);
+    const minDevices = minDevicesForLayout(poolWizard.layout);
+    if (dataDevices.length < minDevices) {
+      setPoolWizardError(`Layout ${layoutLabel(poolWizard.layout)} needs at least ${minDevices} disk(s).`);
+      return;
+    }
+    const vdevs: ZPool["spec"]["vdevs"] = [{ type: poolWizard.layout, devices: dataDevices }];
+    const logDevices = parseDeviceList(poolWizard.logDevices);
+    const cacheDevices = parseDeviceList(poolWizard.cacheDevices);
+    const spareDevices = parseDeviceList(poolWizard.spareDevices);
+    if (logDevices.length) vdevs.push({ type: "log", devices: logDevices });
+    if (cacheDevices.length) vdevs.push({ type: "cache", devices: cacheDevices });
+    if (spareDevices.length) vdevs.push({ type: "spare", devices: spareDevices });
+
+    setActionBusy(true);
+    try {
+      await upsertZPool(name, {
+        nodeName: poolWizard.nodeName.trim(),
+        poolName: name,
+        vdevs
+      });
+      closePoolWizard();
+      await refreshAll();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Pool creation failed";
+      setPoolWizardError(message);
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const handleEdit = (kind: ModalKind, item: { metadata: { name: string }; spec?: object }) => {
@@ -317,6 +456,25 @@ export default function App() {
 
   const busy = loading || snapshotsLoading || actionBusy;
   const view = viewMeta[activeView];
+  const poolWizardSpec = useMemo(() => {
+    if (!poolWizard) return null;
+    const dataDevices = parseDeviceList(poolWizard.dataDevices);
+    const logDevices = parseDeviceList(poolWizard.logDevices);
+    const cacheDevices = parseDeviceList(poolWizard.cacheDevices);
+    const spareDevices = parseDeviceList(poolWizard.spareDevices);
+    const vdevs: ZPool["spec"]["vdevs"] = [];
+    if (dataDevices.length) {
+      vdevs.push({ type: poolWizard.layout, devices: dataDevices });
+    }
+    if (logDevices.length) vdevs.push({ type: "log", devices: logDevices });
+    if (cacheDevices.length) vdevs.push({ type: "cache", devices: cacheDevices });
+    if (spareDevices.length) vdevs.push({ type: "spare", devices: spareDevices });
+    return {
+      nodeName: poolWizard.nodeName.trim(),
+      poolName: poolWizard.name.trim(),
+      vdevs
+    };
+  }, [poolWizard]);
 
   return (
     <div className="app">
@@ -581,36 +739,176 @@ export default function App() {
         )}
 
         {activeView === "pools" && (
-          <section className="resource-page">
-            <div className="page-header">
+          <section className="storage-page">
+            <div className="storage-toolbar">
               <div>
-                <h2>ZFS Pools</h2>
-                <p className="page-sub">Create or destroy pools, and adjust vdev layouts.</p>
+                <h2>Storage Dashboard</h2>
+                <p className="page-sub">Build ZFS pools from disks and monitor topology health.</p>
               </div>
-              <button className="primary" onClick={() => handleCreate("pools")} disabled={busy}>
-                Create Pool
-              </button>
+              <div className="storage-actions">
+                <button className="ghost" disabled>
+                  Import Pool
+                </button>
+                <button className="ghost" onClick={() => setDisksModalOpen(true)} disabled={busy}>
+                  Disks
+                </button>
+                <button className="primary" onClick={openPoolWizard} disabled={busy}>
+                  Create Pool
+                </button>
+              </div>
             </div>
-            <ResourceTable
-              items={pools}
-              columns={[
-                { label: "Name", render: (pool) => pool.metadata.name },
-                { label: "Pool", render: (pool) => pool.spec.poolName || "" },
-                { label: "Node", render: (pool) => pool.spec.nodeName || "" },
-                {
-                  label: "Vdevs",
-                  render: (pool) =>
-                    pool.spec.vdevs?.map((vdev) => vdev.type).filter(Boolean).join(", ") || ""
-                },
-                { label: "Status", render: (pool) => <span className={`status ${statusTone(pool.status?.phase)}`}>
-                    {pool.status?.phase ?? "Unknown"}
-                  </span> }
-              ]}
-              loading={loading}
-              emptyLabel="No pools yet."
-              onEdit={(item) => handleEdit("pools", item)}
-              onDelete={(item) => handleDelete("pools", item.metadata.name)}
-            />
+
+            <div className="storage-grid">
+              <div className="storage-card">
+                <div className="storage-card-title">Unassigned Disks</div>
+                <div className="storage-card-value">N/A</div>
+                <div className="storage-card-sub">
+                  Disk inventory is not synced yet. Connect node-agent disk discovery to enable automated selection.
+                </div>
+                <button className="table-button" onClick={openPoolWizard} disabled={busy}>
+                  Add to Pool
+                </button>
+              </div>
+              <div className="storage-card storage-card-wide">
+                <div className="storage-card-title">Storage Guidance</div>
+                <div className="storage-card-sub">
+                  Use mirror or RAIDZ layouts for redundancy. Configure log, cache, and spare vdevs based on workload.
+                </div>
+                <div className="storage-pill-row">
+                  <span className="storage-pill">Mirror</span>
+                  <span className="storage-pill">RAIDZ1</span>
+                  <span className="storage-pill">RAIDZ2</span>
+                  <span className="storage-pill muted">dRAID (soon)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="storage-pools">
+              {loading && <div className="panel-empty">Loading pools...</div>}
+              {!loading && pools.length === 0 && (
+                <div className="panel-empty">
+                  No pools yet. Create your first pool to unlock datasets and shares.
+                </div>
+              )}
+              {!loading &&
+                pools.map((pool) => {
+                  const vdevs = pool.spec.vdevs ?? [];
+                  const dataVdevs = vdevs.filter((vdev) => dataLayouts.has((vdev.type || "").toLowerCase()));
+                  const logVdevs = vdevs.filter((vdev) => vdev.type === "log");
+                  const cacheVdevs = vdevs.filter((vdev) => vdev.type === "cache");
+                  const spareVdevs = vdevs.filter((vdev) => vdev.type === "spare");
+                  const dataLayout = dataVdevs[0]?.type ?? "stripe";
+                  const dataWidth = dataVdevs[0]?.devices?.length ?? 0;
+                  const dataSummary =
+                    dataVdevs.length > 0
+                      ? `${dataVdevs.length} x ${layoutLabel(dataLayout)} | ${dataWidth} wide`
+                      : "None";
+                  const logSummary =
+                    logVdevs.length > 0 ? `${logVdevs.length} vdev${logVdevs.length > 1 ? "s" : ""}` : "None";
+                  const cacheSummary =
+                    cacheVdevs.length > 0 ? `${cacheVdevs.length} vdev${cacheVdevs.length > 1 ? "s" : ""}` : "None";
+                  const spareSummary =
+                    spareVdevs.length > 0 ? `${spareVdevs.length} vdev${spareVdevs.length > 1 ? "s" : ""}` : "None";
+
+                  return (
+                    <div key={pool.metadata.name} className="pool-card">
+                      <div className="pool-card-header">
+                        <div>
+                          <div className="pool-title">{pool.spec.poolName || pool.metadata.name}</div>
+                          <div className="pool-sub">{pool.metadata.name}</div>
+                        </div>
+                        <div className="pool-actions">
+                          <button className="table-button" onClick={() => handleEdit("pools", pool)}>
+                            Manage Devices
+                          </button>
+                          <button className="table-button" onClick={() => setActiveView("datasets")}>
+                            Manage Datasets
+                          </button>
+                          <button className="table-button danger" onClick={() => handleDelete("pools", pool.metadata.name)}>
+                            Export / Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pool-grid">
+                        <div className="pool-panel">
+                          <div className="pool-panel-title">Topology</div>
+                          <div className="pool-row">
+                            <span>Data VDEVs</span>
+                            <strong>{dataSummary}</strong>
+                          </div>
+                          <div className="pool-row">
+                            <span>Log VDEVs</span>
+                            <strong>{logSummary}</strong>
+                          </div>
+                          <div className="pool-row">
+                            <span>Cache VDEVs</span>
+                            <strong>{cacheSummary}</strong>
+                          </div>
+                          <div className="pool-row">
+                            <span>Spare VDEVs</span>
+                            <strong>{spareSummary}</strong>
+                          </div>
+                        </div>
+
+                        <div className="pool-panel">
+                          <div className="pool-panel-title">Usage</div>
+                          <div className="usage-meter">
+                            <div className="usage-value">N/A</div>
+                            <div className="usage-sub">Usage telemetry pending</div>
+                          </div>
+                          <div className="usage-list">
+                            <div>
+                              <span>Usable capacity</span>
+                              <strong>N/A</strong>
+                            </div>
+                            <div>
+                              <span>Used</span>
+                              <strong>N/A</strong>
+                            </div>
+                            <div>
+                              <span>Available</span>
+                              <strong>N/A</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pool-panel">
+                          <div className="pool-panel-title">ZFS Health</div>
+                          <div className="pool-row">
+                            <span>Pool status</span>
+                            <span className={`status ${statusTone(pool.status?.phase)}`}>
+                              {pool.status?.phase ?? "Unknown"}
+                            </span>
+                          </div>
+                          <div className="pool-row">
+                            <span>Scrub task</span>
+                            <strong>Not scheduled</strong>
+                          </div>
+                          <button className="table-button" disabled>
+                            Run Scrub
+                          </button>
+                        </div>
+
+                        <div className="pool-panel">
+                          <div className="pool-panel-title">Disk Health</div>
+                          <div className="pool-row">
+                            <span>SMART status</span>
+                            <strong>Not connected</strong>
+                          </div>
+                          <div className="pool-row">
+                            <span>Temperature</span>
+                            <strong>N/A</strong>
+                          </div>
+                          <button className="table-button" disabled>
+                            View SMART Reports
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
           </section>
         )}
 
@@ -741,6 +1039,258 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {disksModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal modal-wide">
+            <div className="modal-header">
+              <div>
+                <div className="modal-eyebrow">Storage</div>
+                <h3>Disk Inventory</h3>
+              </div>
+              <button className="icon-button" onClick={() => setDisksModalOpen(false)} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="disk-empty">
+                <strong>No disk inventory available.</strong>
+                <p>
+                  Disk discovery is handled by the node-agent. Wire the disk inventory endpoint into nas-api
+                  to enable wipe, import, and automated pool creation workflows.
+                </p>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setDisksModalOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {poolWizard && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal modal-wide">
+            <div className="modal-header">
+              <div>
+                <div className="modal-eyebrow">Storage</div>
+                <h3>Pool Creation Wizard</h3>
+              </div>
+              <button className="icon-button" onClick={closePoolWizard} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="wizard">
+              <aside className="wizard-steps">
+                {poolWizardSteps.map((label, index) => (
+                  <div
+                    key={label}
+                    className={`wizard-step${poolWizard.step === index ? " active" : ""}${
+                      poolWizard.step > index ? " done" : ""
+                    }`}
+                  >
+                    <span className="wizard-step-index">{index + 1}</span>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </aside>
+              <div className="wizard-panel">
+                {poolWizard.step === 0 && (
+                  <div className="wizard-section">
+                    <h4>General Info</h4>
+                    <div className="wizard-grid">
+                      <label className="form-field">
+                        <span>Pool name</span>
+                        <input
+                          type="text"
+                          value={poolWizard.name}
+                          placeholder="tank"
+                          onChange={(event) => updatePoolWizard({ name: event.target.value })}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Target node</span>
+                        <input
+                          type="text"
+                          value={poolWizard.nodeName}
+                          placeholder="worker-1"
+                          onChange={(event) => updatePoolWizard({ nodeName: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={poolWizard.encryption}
+                        onChange={(event) => updatePoolWizard({ encryption: event.target.checked })}
+                        disabled
+                      />
+                      <span>Encryption (planned)</span>
+                    </label>
+                    <p className="wizard-hint">
+                      Pool names must be lowercase and are permanent. Encryption will be supported in a future release.
+                    </p>
+                  </div>
+                )}
+
+                {poolWizard.step === 1 && (
+                  <div className="wizard-section">
+                    <h4>Data VDEV</h4>
+                    <label className="form-field">
+                      <span>Layout</span>
+                      <select
+                        value={poolWizard.layout}
+                        onChange={(event) =>
+                          updatePoolWizard({ layout: event.target.value as PoolWizardState["layout"] })
+                        }
+                      >
+                        <option value="stripe">Stripe</option>
+                        <option value="mirror">Mirror</option>
+                        <option value="raidz1">RAIDZ1</option>
+                        <option value="raidz2">RAIDZ2</option>
+                      </select>
+                    </label>
+
+                    <div className="wizard-grid">
+                      <div className="wizard-card muted">
+                        <div className="wizard-card-title">Automated Disk Selection</div>
+                        <p className="wizard-card-sub">Connect node-agent disk inventory to enable this workflow.</p>
+                        <label className="form-field">
+                          <span>Disk size</span>
+                          <input type="text" value="Disk inventory required" disabled />
+                        </label>
+                        <label className="form-field">
+                          <span>Width</span>
+                          <input type="text" value="N/A" disabled />
+                        </label>
+                        <label className="form-field">
+                          <span>Number of VDEVs</span>
+                          <input type="text" value="N/A" disabled />
+                        </label>
+                      </div>
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">Manual Disk Selection</div>
+                        <p className="wizard-card-sub">
+                          Provide device paths separated by spaces or new lines.
+                        </p>
+                        <label className="form-field">
+                          <span>Device paths</span>
+                          <textarea
+                            rows={6}
+                            value={poolWizard.dataDevices}
+                            placeholder="/dev/sdb /dev/sdc"
+                            onChange={(event) => updatePoolWizard({ dataDevices: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {poolWizard.step === 2 && (
+                  <div className="wizard-section">
+                    <h4>Log VDEV (Optional)</h4>
+                    <p className="wizard-hint">Add high-speed devices to accelerate synchronous writes.</p>
+                    <label className="form-field">
+                      <span>Log device paths</span>
+                      <textarea
+                        rows={5}
+                        value={poolWizard.logDevices}
+                        placeholder="/dev/nvme0n1"
+                        onChange={(event) => updatePoolWizard({ logDevices: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {poolWizard.step === 3 && (
+                  <div className="wizard-section">
+                    <h4>Cache VDEV (Optional)</h4>
+                    <p className="wizard-hint">Add L2ARC cache devices for read-heavy workloads.</p>
+                    <label className="form-field">
+                      <span>Cache device paths</span>
+                      <textarea
+                        rows={5}
+                        value={poolWizard.cacheDevices}
+                        placeholder="/dev/nvme1n1"
+                        onChange={(event) => updatePoolWizard({ cacheDevices: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {poolWizard.step === 4 && (
+                  <div className="wizard-section">
+                    <h4>Spare VDEV (Optional)</h4>
+                    <p className="wizard-hint">Add hot spare devices to automatically replace failed disks.</p>
+                    <label className="form-field">
+                      <span>Spare device paths</span>
+                      <textarea
+                        rows={5}
+                        value={poolWizard.spareDevices}
+                        placeholder="/dev/sdd"
+                        onChange={(event) => updatePoolWizard({ spareDevices: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {poolWizard.step === poolWizardSteps.length - 1 && (
+                  <div className="wizard-section">
+                    <h4>Review</h4>
+                    <div className="review-grid">
+                      <div>
+                        <div className="review-label">Pool name</div>
+                        <div className="review-value">{poolWizard.name || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Target node</div>
+                        <div className="review-value">{poolWizard.nodeName || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Layout</div>
+                        <div className="review-value">{layoutLabel(poolWizard.layout)}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Data disks</div>
+                        <div className="review-value">{parseDeviceList(poolWizard.dataDevices).length}</div>
+                      </div>
+                    </div>
+                    <div className="review-code">
+                      <div className="review-label">Spec preview</div>
+                      <pre>{JSON.stringify(poolWizardSpec, null, 2)}</pre>
+                    </div>
+                  </div>
+                )}
+                {poolWizardError && <div className="modal-error">{poolWizardError}</div>}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost" onClick={closePoolWizard} disabled={actionBusy}>
+                Cancel
+              </button>
+              <button
+                className="ghost"
+                onClick={() => handlePoolWizardStep("back")}
+                disabled={actionBusy || poolWizard.step === 0}
+              >
+                Back
+              </button>
+              {poolWizard.step < poolWizardSteps.length - 1 ? (
+                <button className="primary" onClick={() => handlePoolWizardStep("next")} disabled={actionBusy}>
+                  Next
+                </button>
+              ) : (
+                <button className="primary" onClick={handlePoolWizardCreate} disabled={actionBusy}>
+                  Create Pool
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
