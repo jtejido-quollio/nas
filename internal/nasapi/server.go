@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -21,11 +22,13 @@ import (
 )
 
 type Server struct {
-	client    client.Client
-	namespace string
-	webRoot   string
-	logger    *log.Logger
-	mux       *http.ServeMux
+	client        client.Client
+	namespace     string
+	webRoot       string
+	nodeAgentURL  string
+	httpClient    *http.Client
+	logger        *log.Logger
+	mux           *http.ServeMux
 }
 
 type apiError struct {
@@ -37,6 +40,26 @@ type overviewResponse struct {
 	Datasets    []nasv1.ZDataset    `json:"datasets"`
 	Shares      []nasv1.NASShare    `json:"shares"`
 	Directories []nasv1.NASDirectory `json:"directories"`
+}
+
+type nodeAgentDisk struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+}
+
+type nodeAgentDisksResponse struct {
+	Disks []nodeAgentDisk `json:"disks"`
+}
+
+type nodeAgentDisksUpdatedResponse struct {
+	Updated string `json:"updated"`
+	Count   int    `json:"count"`
+}
+
+type diskInventoryResponse struct {
+	Disks   []nodeAgentDisk `json:"disks"`
+	Updated string          `json:"updated,omitempty"`
+	Count   int             `json:"count"`
 }
 
 type createRequest[T any] struct {
@@ -55,17 +78,24 @@ func NewServer(c client.Client, namespace, webRoot string, logger *log.Logger) *
 	if logger == nil {
 		logger = log.New(os.Stdout, "nas-api ", log.LstdFlags)
 	}
+	nodeAgentURL := strings.TrimSpace(os.Getenv("NODE_AGENT_URL"))
+	if nodeAgentURL == "" {
+		nodeAgentURL = "http://nas-node-agent." + namespace + ".svc.cluster.local:9808"
+	}
 	mux := http.NewServeMux()
 	s := &Server{
-		client:    c,
-		namespace: namespace,
-		webRoot:   webRoot,
-		logger:    logger,
-		mux:       mux,
+		client:       c,
+		namespace:    namespace,
+		webRoot:      webRoot,
+		nodeAgentURL: strings.TrimRight(nodeAgentURL, "/"),
+		httpClient:   &http.Client{Timeout: 5 * time.Second},
+		logger:       logger,
+		mux:          mux,
 	}
 
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/v1/overview", s.handleOverview)
+	mux.HandleFunc("/v1/disks", s.handleDisks)
 	mux.HandleFunc("/v1/zpools", s.handleZPools)
 	mux.HandleFunc("/v1/zpools/", s.handleZPool)
 	mux.HandleFunc("/v1/zdatasets", s.handleZDatasets)
@@ -144,6 +174,42 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		Directories: directories.Items,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.nodeAgentURL == "" {
+		writeError(w, http.StatusServiceUnavailable, "node-agent url not configured")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var disks nodeAgentDisksResponse
+	if err := s.fetchNodeAgentJSON(ctx, "/v1/disks", &disks); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+
+	var updated nodeAgentDisksUpdatedResponse
+	if err := s.fetchNodeAgentJSON(ctx, "/v1/disks/updated", &updated); err != nil {
+		s.logger.Printf("node-agent updated check failed: %v", err)
+	}
+
+	count := updated.Count
+	if count == 0 {
+		count = len(disks.Disks)
+	}
+
+	writeJSON(w, http.StatusOK, diskInventoryResponse{
+		Disks:   disks.Disks,
+		Updated: updated.Updated,
+		Count:   count,
+	})
 }
 
 func (s *Server) handleZPools(w http.ResponseWriter, r *http.Request) {
@@ -479,6 +545,27 @@ func upsertResource(ctx context.Context, c client.Client, obj client.Object) err
 	}
 	obj.SetResourceVersion(current.GetResourceVersion())
 	return c.Update(ctx, obj)
+}
+
+func (s *Server) fetchNodeAgentJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.nodeAgentURL+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body, _ := io.ReadAll(resp.Body)
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return errors.New(msg)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func sanitizeFilePath(root, p string) string {

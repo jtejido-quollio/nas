@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchOverview,
+  listDisks,
   listZSnapshots,
   upsertZPool,
   deleteZPool,
@@ -16,6 +17,7 @@ import {
   Overview,
   NASDirectory,
   NASShare,
+  DiskInventory,
   ZDataset,
   ZPool,
   ZSnapshot
@@ -234,9 +236,12 @@ function ResourceTable<T extends { metadata: { name: string } }>(props: {
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [snapshots, setSnapshots] = useState<ZSnapshot[]>([]);
+  const [diskInventory, setDiskInventory] = useState<DiskInventory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [diskError, setDiskError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [snapshotsLoading, setSnapshotsLoading] = useState(true);
+  const [diskLoading, setDiskLoading] = useState(true);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [modal, setModal] = useState<ModalState | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -248,17 +253,35 @@ export default function App() {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     setSnapshotsLoading(true);
+    setDiskLoading(true);
     setError(null);
+    setDiskError(null);
     try {
-      const [overviewData, snapshotData] = await Promise.all([fetchOverview(), listZSnapshots()]);
-      setOverview(overviewData);
-      setSnapshots(snapshotData);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load overview";
-      setError(message);
+      const [overviewResult, snapshotResult, disksResult] = await Promise.allSettled([
+        fetchOverview(),
+        listZSnapshots(),
+        listDisks()
+      ]);
+      if (overviewResult.status === "fulfilled") {
+        setOverview(overviewResult.value);
+      } else {
+        setError(overviewResult.reason instanceof Error ? overviewResult.reason.message : "Failed to load overview");
+      }
+      if (snapshotResult.status === "fulfilled") {
+        setSnapshots(snapshotResult.value);
+      } else {
+        setError((prev) => prev ?? "Failed to load snapshots");
+      }
+      if (disksResult.status === "fulfilled") {
+        setDiskInventory(disksResult.value);
+      } else {
+        setDiskInventory(null);
+        setDiskError(disksResult.reason instanceof Error ? disksResult.reason.message : "Failed to load disks");
+      }
     } finally {
       setLoading(false);
       setSnapshotsLoading(false);
+      setDiskLoading(false);
     }
   }, []);
 
@@ -271,6 +294,8 @@ export default function App() {
   const shares = overview?.shares ?? [];
   const directories = overview?.directories ?? [];
   const suggestedNodeName = pools[0]?.spec.nodeName ?? "";
+  const diskCount = diskInventory?.count ?? diskInventory?.disks?.length ?? 0;
+  const diskUpdated = diskInventory?.updated ?? "";
 
   const { errorCount, healthLabel } = useMemo(() => {
     const badPools = pools.filter((pool) => statusTone(pool.status?.phase) === "bad");
@@ -761,9 +786,17 @@ export default function App() {
             <div className="storage-grid">
               <div className="storage-card">
                 <div className="storage-card-title">Unassigned Disks</div>
-                <div className="storage-card-value">N/A</div>
+                <div className="storage-card-value">
+                  {diskLoading ? "Loading" : diskError ? "N/A" : diskCount}
+                </div>
                 <div className="storage-card-sub">
-                  Disk inventory is not synced yet. Connect node-agent disk discovery to enable automated selection.
+                  {diskLoading && "Syncing disk inventory from node-agent."}
+                  {!diskLoading && diskError && "Disk inventory unavailable. Check node-agent connectivity."}
+                  {!diskLoading &&
+                    !diskError &&
+                    (diskCount === 0
+                      ? "No disks discovered yet. Attach disks to the node to create a pool."
+                      : `Discovered ${diskCount} disks${diskUpdated ? ` · Updated ${diskUpdated}` : ""}.`)}
                 </div>
                 <button className="table-button" onClick={openPoolWizard} disabled={busy}>
                   Add to Pool
@@ -1053,13 +1086,48 @@ export default function App() {
               </button>
             </div>
             <div className="modal-body">
-              <div className="disk-empty">
-                <strong>No disk inventory available.</strong>
-                <p>
-                  Disk discovery is handled by the node-agent. Wire the disk inventory endpoint into nas-api
-                  to enable wipe, import, and automated pool creation workflows.
-                </p>
-              </div>
+              {diskLoading && (
+                <div className="disk-empty">
+                  <strong>Loading disk inventory...</strong>
+                  <p>Waiting for node-agent discovery.</p>
+                </div>
+              )}
+              {!diskLoading && diskError && (
+                <div className="disk-empty">
+                  <strong>Disk inventory unavailable.</strong>
+                  <p>{diskError}</p>
+                </div>
+              )}
+              {!diskLoading && !diskError && diskInventory && diskInventory.disks.length === 0 && (
+                <div className="disk-empty">
+                  <strong>No disks discovered.</strong>
+                  <p>Attach disks to the node-agent host to populate inventory.</p>
+                </div>
+              )}
+              {!diskLoading && !diskError && diskInventory && diskInventory.disks.length > 0 && (
+                <div className="disk-list">
+                  <div className="disk-meta">
+                    <span>{diskInventory.disks.length} disks discovered</span>
+                    {diskInventory.updated && <span>Updated {diskInventory.updated}</span>}
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Path</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diskInventory.disks.map((disk) => (
+                        <tr key={disk.id}>
+                          <td>{disk.id}</td>
+                          <td>{disk.path}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
             <div className="modal-actions">
               <button className="ghost" onClick={() => setDisksModalOpen(false)}>

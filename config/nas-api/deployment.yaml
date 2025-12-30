@@ -22,6 +22,9 @@ spec:
             - --namespace=nas-system
             - --listen=:8080
             - --web-root=/usr/share/nas-ui
+          env:
+            - name: NODE_AGENT_URL
+              value: http://nas-node-agent.nas-system.svc.cluster.local:9808
           ports:
             - name: http
               containerPort: 8080

@@ -44,6 +44,17 @@ export type ZSnapshot = {
   status?: { phase?: string; message?: string; volumeSnapshotName?: string };
 };
 
+export type DiskInfo = {
+  id: string;
+  path: string;
+};
+
+export type DiskInventory = {
+  disks: DiskInfo[];
+  updated?: string;
+  count?: number;
+};
+
 export type Overview = {
   pools: ZPool[];
   datasets: ZDataset[];
@@ -74,6 +85,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchOverview(): Promise<Overview> {
   return request<Overview>("/v1/overview");
+}
+
+export function listDisks(): Promise<DiskInventory> {
+  return request<DiskInventory>("/v1/disks");
 }
 
 type CreateRequest<T> = {
