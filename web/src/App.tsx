@@ -24,7 +24,7 @@ function statusTone(phase?: string) {
 
 function directoryConnectivity(directory: NASDirectory) {
   const condition = directory.status?.conditions?.find((c) => c.type === "Connectivity");
-  if (!condition) return "unknown";
+  if (!condition) return "defined";
   return condition.status === "True" ? "connected" : "offline";
 }
 

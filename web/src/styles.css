@@ -19,7 +19,7 @@ body {
   margin: 0;
   font-family: "Noto Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
   color: var(--ink);
-  background: linear-gradient(135deg, #f6fbff 0%, #eff6fb 45%, #e6eef7 100%);
+  background: linear-gradient(135deg, #f2f8fd 0%, #b7d6ee 45%, #569ae8 100%);
   min-height: 100vh;
 }
 
@@ -49,7 +49,7 @@ body {
 
 .nav {
   padding: 32px 24px;
-  background: rgba(244, 249, 255, 0.85);
+  background: #ffffff;
   border-right: 1px solid rgba(214, 228, 239, 0.8);
   display: flex;
   flex-direction: column;
