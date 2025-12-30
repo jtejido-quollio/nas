@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchOverview, Overview, NASDirectory, NASShare, ZDataset, ZPool } from "./api";
 
 const navItems = [
-  { label: "Dashboard", active: true },
-  { label: "Pools" },
-  { label: "Datasets" },
-  { label: "Shares" },
-  { label: "Directories" },
-  { label: "Snapshots" }
+  { id: "dashboard", label: "Dashboard" },
+  { id: "pools", label: "Pools" },
+  { id: "datasets", label: "Datasets" },
+  { id: "shares", label: "Shares" },
+  { id: "directories", label: "Directories" },
+  { id: "snapshots", label: "Snapshots" }
 ];
 
 function getStatus(phase?: string) {
@@ -32,8 +32,9 @@ export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeNav, setActiveNav] = useState("dashboard");
 
-  useEffect(() => {
+  const refreshOverview = () => {
     let active = true;
     setLoading(true);
     fetchOverview()
@@ -52,7 +53,23 @@ export default function App() {
     return () => {
       active = false;
     };
+  };
+
+  useEffect(() => {
+    return refreshOverview();
   }, []);
+
+  const handleNavClick = (id: string) => {
+    setActiveNav(id);
+    if (id === "dashboard") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    const target = document.getElementById(id);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
 
   const pools = overview?.pools ?? [];
   const datasets = overview?.datasets ?? [];
@@ -81,7 +98,11 @@ export default function App() {
         <div className="nav-section">Core</div>
         <nav className="nav-items">
           {navItems.map((item) => (
-            <button key={item.label} className={item.active ? "nav-item active" : "nav-item"}>
+            <button
+              key={item.label}
+              className={activeNav === item.id ? "nav-item active" : "nav-item"}
+              onClick={() => handleNavClick(item.id)}
+            >
               {item.label}
             </button>
           ))}
@@ -93,7 +114,7 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" id="dashboard">
         <header className="topbar">
           <div>
             <h1>Storage Overview</h1>
@@ -106,7 +127,9 @@ export default function App() {
               {healthLabel}
               <span className="health-count">{errorCount}</span>
             </div>
-            <button className="ghost">Sync</button>
+            <button className="ghost" onClick={refreshOverview} disabled={loading}>
+              Sync
+            </button>
           </div>
         </header>
 
@@ -175,7 +198,7 @@ export default function App() {
         </section>
 
         <section className="panel-grid">
-          <div className="panel">
+          <div className="panel" id="pools">
             <div className="panel-header">
               <h2>Pools</h2>
               <span className="panel-chip">ZPool</span>
@@ -201,7 +224,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel" id="datasets">
             <div className="panel-header">
               <h2>Datasets</h2>
               <span className="panel-chip">ZDataset</span>
@@ -227,7 +250,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel" id="shares">
             <div className="panel-header">
               <h2>Shares</h2>
               <span className="panel-chip">NASShare</span>
@@ -255,7 +278,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel" id="directories">
             <div className="panel-header">
               <h2>Directories</h2>
               <span className="panel-chip">NASDirectory</span>
@@ -283,6 +306,16 @@ export default function App() {
                 </ul>
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="panel wide" id="snapshots">
+          <div className="panel-header">
+            <h2>Snapshots</h2>
+            <span className="panel-chip">ZSnapshot</span>
+          </div>
+          <div className="panel-body">
+            <div className="panel-empty">Snapshots are not exposed in the overview yet.</div>
           </div>
         </section>
 
