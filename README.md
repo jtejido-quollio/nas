@@ -20,6 +20,8 @@ A small “control plane” that lets you declare storage and SMB services using
 - **NASShare** — SMB or NFS share backed by ZFS datasets or CSI PVCs
 - **NASDirectory** — identity source (local, LDAP, Active Directory)
 - **NASUser/NASGroup** — local directory users/groups (secrets-backed)
+- **nas-api** — REST API that reads/writes CRDs directly (etcd-backed)
+- **nas-ui** — React dashboard that talks to `nas-api`
 
 ## Why we built it (vs TrueNAS/FreeNAS)
 Traditional NAS OSes are **appliance-style**: one box, one UI, imperative configuration.
@@ -47,11 +49,31 @@ This system is **GitOps + Kubernetes-style**:
 ## Non-goals (explicitly out of scope)
 - Automated AD/LDAP join
 - HA/replication between nodes
-- UI
+- Full multi-tenant UI (a minimal dashboard is provided)
 - Multi-tenant isolation
 
 ## Architecture and diagrams
 See **ARCHITECTURE.md** for component diagrams, sequence flows, and the Phase 2 boundary.
+
+## nas-api + UI
+`nas-api` is a thin REST layer that talks directly to Kubernetes. All state is
+stored in **etcd via CRDs/Secrets**; there is no separate database.
+
+Local UI dev (runs Vite, proxies to your VM):
+```bash
+cd web
+npm install
+VITE_API_BASE=http://<vm-ip>:30080 npm run dev
+```
+
+In-cluster (serves the UI from the same pod):
+```bash
+make build
+make images
+make K3S_CTR="sudo k3s ctr" load-images
+make deploy-api
+```
+UI is exposed on `http://<vm-ip>:30080` by default.
 
 ## How to run
 See **RUNBOOK.md** for a step-by-step Mac + Docker/Podman + k3s-on-Linux-VM guide.
@@ -62,5 +84,5 @@ make tidy
 make build
 make images
 make K3S_CTR="sudo k3s ctr" load-images
-make deploy-phase1
+make deploy-samples
 ```

@@ -54,10 +54,10 @@ export KUBECTL="sudo k3s kubectl"
 alias kubectl="sudo k3s kubectl"
 ```
 
-### Phase 0 smoke (optional)
+### Samples smoke (optional)
 ```bash
-make deploy-phase0
-make phase0-smoke NODE_AGENT_URL=http://<node-ip>:9808
+make deploy-samples
+make samples-smoke NODE_AGENT_URL=http://<node-ip>:9808
 ```
 
 ## 2) Verify k3s is running
@@ -89,7 +89,7 @@ If your VM is ARM64 (Apple Silicon/UTM), build with:
 make PLATFORM=linux/arm64 images
 ```
 
-Phase 0 validation (node-agent API only) is documented in `config/samples/phase0/README.md`.
+Samples validation (node-agent API only) is documented in `config/samples/README.md`.
 
 ## 5) Update sample node/device values
 Before deploying, update `nodeName` and device paths to match your VM:
@@ -98,21 +98,21 @@ kubectl get nodes -o wide
 ```
 
 Files to edit (anything with `nodeName`):
-- `config/samples/phase1/10-pool/zpool.yaml`
-- `config/samples/phase2/10-pool/zpool.yaml`
-- `config/samples/phase2/20-dataset/zdataset-home.yaml`
-- `config/samples/phase2/20-dataset/zdataset-nfs.yaml`
-- `config/samples/phase2/40-snapshots/zsnapshotschedule-home.yaml`
-- `config/samples/phase2/50-restore/zsnapshotrestore-clone.yaml`
+- `config/samples/10-pool/zpool.yaml`
+- `config/samples/20-dataset/zdataset-home.yaml`
+- `config/samples/20-dataset/zdataset-nfs.yaml`
+- `config/samples/40-snapshots/zsnapshotschedule-home.yaml`
+- `config/samples/50-restore/zsnapshotrestore-clone.yaml`
 
-## 6) Deploy Phase 1 (Storage MVP)
-Phase 1 includes:
+## 6) Deploy samples (Storage + shares)
+The samples include:
 * nas-node-agent + nas-operator
 * OpenEBS ZFS LocalPV (CSI) for dynamic PVC provisioning
 * CSI VolumeSnapshot support (ZSnapshot + ZSnapshotRestore mode=csi)
+* NASShare resources (SMB + NFS) backed by ZFS datasets / PVCs
 
 ```bash
-make deploy-phase1
+make deploy-samples
 ```
 
 ### Ensure pools/datasets mount after reboot (optional)
@@ -127,16 +127,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nas-zfs-boot.service
 ```
 
-### Phase 1 verify
+### Verify core resources
 ```bash
 kubectl -n nas-system get pods -o wide
 kubectl -n nas-system get zpool,zdataset,zsnapshot,zsnapshotrestore
 kubectl -n nas-system get pvc,pv,volumesnapshot
 ```
 
-### Phase 1 health script (optional)
+### Samples health (optional)
 ```bash
-./scripts/phase1-health.sh
+make samples-smoke
 ```
 
 Wait until:
@@ -145,17 +145,18 @@ Wait until:
 * the VolumeSnapshot is ReadyToUse
 * the restore PVC is Bound
 
-## 7) Deploy Phase 2 (optional)
-```bash
-make deploy-phase2
-```
-Phase 2 uses NASShare resources; the Time Machine share mounts a CSI-backed PVC.
+## 7) NASShare notes (SMB + NFS)
+The samples use NASShare resources; the Time Machine share mounts a CSI-backed PVC.
 The home share uses the ZFS dataset directly so snapshot schedules remain aligned.
-The sample Time Machine PVC size is small for labs; adjust `config/samples/phase2/25-pvc/pvc-timemachine.yaml`
+The sample Time Machine PVC size is small for labs; adjust `config/samples/25-pvc/pvc-timemachine.yaml`
 if your pool has more capacity.
-Phase 2 assumes a local directory (`NASDirectory` named `local`) and uses `NASUser`/`NASGroup`.
-Optional AD/LDAP samples are in `config/samples/phase2/00-directory/` but are not part of the default kustomization.
+The default samples assume a local directory (`NASDirectory` named `local`) and use `NASUser`/`NASGroup`.
+Optional AD/LDAP samples are in `config/samples/00-directory/` but are not part of the default kustomization.
 to define local identities for SMB/NFS.
+Samples expect host packages/services when using NFS or AD/LDAP:
+- `nfs-kernel-server` (kernel NFS exports)
+- `sssd` + `ldap-utils` (AD/LDAP identity lookups)
+The health script will fail if these are missing when relevant.
 
 ## 8) Verify resources
 ```bash
@@ -164,12 +165,47 @@ kubectl -n nas-system get svc -o wide
 kubectl -n nas-system get zpool,zdataset,nasshare,nasdirectory,nasuser,nasgroup,zsnapshotschedule
 ```
 
-### Phase 2 health script (optional)
+### Samples health script (optional)
 ```bash
-./scripts/phase2-health.sh
+./scripts/samples-health.sh
+```
+Optional AD/LDAP smoke tests (these patch `nfs-share` temporarily and then restore it):
+```bash
+make samples-ad-smoke
+make samples-ldap-smoke
+```
+You can override the share or user being checked:
+```bash
+NASSHARE_NAME=nfs-share SMOKE_USER=alice make samples-ad-smoke
 ```
 
-## 9) Connect from your Mac (SMB)
+## 9) Deploy nas-api + dashboard (optional)
+Build and load the `nas-api` image:
+```bash
+make build
+make images
+make K3S_CTR="sudo k3s ctr" load-images
+make deploy-api
+```
+
+Access the UI:
+```bash
+http://<VM-IP>:30080
+```
+
+Or use port-forwarding:
+```bash
+kubectl -n nas-system port-forward svc/nas-api 8080:8080
+```
+
+Local UI dev (optional):
+```bash
+cd web
+npm install
+VITE_API_BASE=http://<VM-IP>:30080 npm run dev
+```
+
+## 10) Connect from your Mac (SMB)
 Find the VM's IP address:
 ```bash
 ip a
@@ -180,8 +216,8 @@ On macOS Finder:
 - Go → Connect to Server
 - `smb://<VM-IP>:30445/home`
 
-Username/password are from `config/samples/phase2/00-secrets/smb-user-alice.yaml` and
-the NASUser in `config/samples/phase2/00-users/nasuser-alice.yaml`.
+Username/password are from `config/samples/00-secrets/smb-user-alice.yaml` and
+the NASUser in `config/samples/00-users/nasuser-alice.yaml`.
 Samples set `options.autoPermissions.mode: "0777"` to chmod the dataset mountpoint
 for SMB writes. Remove it if you want to manage permissions manually.
 
@@ -205,37 +241,94 @@ options:
     realm: EXAMPLE.COM
     workgroup: EXAMPLE
 ```
+To test the AD sample (`config/samples/00-directory/nasdirectory-ad.yaml`),
+create the bind and CA secrets, then apply the sample:
+```bash
+kubectl -n nas-system create secret generic ad-bind \
+  --from-literal=password='AdminPass123!' \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-## 10) Connect via NFS (kernel)
+sudo cp /var/lib/samba/private/tls/ca.pem /tmp/ad-ca.pem
+kubectl -n nas-system create secret generic ad-ca \
+  --from-file=ca.crt=/tmp/ad-ca.pem \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n nas-system apply -f config/samples/00-directory/nasdirectory-ad.yaml
+```
+The AD sample uses LDAPS on `ldaps://<VM-IP>:636`.
+Samba AD join state is stored in `/var/lib/nas/samba/<share-name>` on the node by default.
+Override with `options.adJoinStatePath` in the NASShare if you want a different location.
+
+To test the LDAP sample (`config/samples/00-directory/nasdirectory-ldap.yaml`),
+create the bind and CA secrets, then apply the sample:
+```bash
+kubectl -n nas-system create secret generic ldap-bind \
+  --from-literal=password='LdapPass123!' \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+sudo cp /path/to/ldap/ca.pem /tmp/ldap-ca.pem
+kubectl -n nas-system create secret generic ldap-ca \
+  --from-file=ca.crt=/tmp/ldap-ca.pem \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n nas-system apply -f config/samples/00-directory/nasdirectory-ldap.yaml
+```
+The LDAP sample defaults to LDAPS on `ldaps://<VM-IP>:636`.
+
+To switch an existing NASShare to use AD or LDAP after applying a directory:
+```bash
+kubectl -n nas-system patch nasshare nfs-share --type merge -p '{"spec":{"directoryRef":"ad"}}'
+kubectl -n nas-system patch nasshare nfs-share --type merge -p '{"spec":{"directoryRef":"ldap"}}'
+```
+
+If AD/LDAP users are not showing up via `getent`, force a refresh:
+```bash
+kubectl -n nas-system annotate nasdirectory ad nas.io/force="$(date +%s)" --overwrite
+kubectl -n nas-system annotate nasshare nfs-share nas.io/force="$(date +%s)" --overwrite
+sudo systemctl restart sssd
+sudo journalctl -u sssd -n 50 --no-pager
+```
+
+Quick sanity checks:
+```bash
+kubectl -n nas-system get secret nasdirectory-ad-nfs-sssd \
+  -o jsonpath='{.data.sssd\.conf}' | base64 -d
+sudo cat /etc/sssd/sssd.conf
+id alice
+```
+
+## 11) Connect via NFS (kernel)
 Ensure `nfs-kernel-server` is installed on the VM (bootstrap does this).
 On macOS:
 ```bash
 sudo mkdir -p /Volumes/nfs
 sudo mount -t nfs <VM-IP>:/mnt/tank/nfs /Volumes/nfs
 ```
+Kernel NFS is host-based in Phase 2 (exports are managed by the node-agent).
+A dedicated NFS gateway pod and CSI-mounted NFS exports are planned for a later phase.
 
-## 11) Validate snapshots and Previous Versions
+## 12) Validate snapshots and Previous Versions
 - Create a file in the SMB share
 - Wait 2–4 minutes (sample schedule is every 2 minutes)
 - Modify/delete the file
 - On Windows: right-click → Properties → Previous Versions
  - On macOS: list `.zfs/snapshot` and copy a file out of a snapshot to confirm content
 
-## 12) Restore by clone
+## 13) Restore by clone
 1. List snapshots from ZFS (inside node):
 ```bash
 sudo zfs list -t snapshot -o name -r tank/home | head
 ```
-2. Edit `config/samples/phase2/50-restore/zsnapshotrestore-clone.yaml` to point to a real snapshot name.
+2. Edit `config/samples/50-restore/zsnapshotrestore-clone.yaml` to point to a real snapshot name.
 3. Apply:
 ```bash
-kubectl apply -k config/samples/phase2
+kubectl apply -k config/samples
 kubectl -n nas-system describe zsnapshotrestore home-restore-clone
 ```
 
-## 13) Cleanup
+## 14) Cleanup
 ```bash
-make cleanup-phase2
+make cleanup-samples
 ```
 
 ## Notes / gotchas

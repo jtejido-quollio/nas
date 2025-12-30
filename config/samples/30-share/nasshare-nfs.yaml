@@ -8,7 +8,7 @@ spec:
   datasetName: tank/nfs
   mountPath: /mnt/tank/nfs
   shareName: nfs
-  directoryRef: ad
+  directoryRef: local
   readOnly: false
   options:
     autoPermissions:

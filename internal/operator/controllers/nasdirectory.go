@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	nasv1 "mnemosyne/api/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,20 +40,12 @@ func (r *NASDirectoryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	dirType, ok := normalizeDirectoryType(obj.Spec.Type)
 	if !ok {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = fmt.Sprintf("unsupported type: %s", obj.Spec.Type)
-		obj.Status.ObservedGeneration = obj.Generation
-		_ = r.Status().Update(ctx, &obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.setDirectoryError(ctx, &obj, fmt.Sprintf("unsupported type: %s", obj.Spec.Type))
 	}
 
 	errs, usesLDAPS := validateDirectorySpec(obj.Spec, dirType)
 	if len(errs) > 0 {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = strings.Join(errs, "; ")
-		obj.Status.ObservedGeneration = obj.Generation
-		_ = r.Status().Update(ctx, &obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.setDirectoryError(ctx, &obj, strings.Join(errs, "; "))
 	}
 
 	var bindSecret, caSecret *corev1.Secret
@@ -59,11 +53,7 @@ func (r *NASDirectoryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if name := secretName(obj.Spec.Bind); name != "" {
 			var sec corev1.Secret
 			if err := r.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: name}, &sec); err != nil {
-				obj.Status.Phase = "Error"
-				obj.Status.Message = fmt.Sprintf("bind secret %s not found: %v", name, err)
-				obj.Status.ObservedGeneration = obj.Generation
-				_ = r.Status().Update(ctx, &obj)
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+				return r.setDirectoryError(ctx, &obj, fmt.Sprintf("bind secret %s not found: %v", name, err))
 			}
 			bindSecret = &sec
 		}
@@ -71,48 +61,28 @@ func (r *NASDirectoryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			if specTLS.CABundleSecretRef != nil && strings.TrimSpace(specTLS.CABundleSecretRef.Name) != "" {
 				var sec corev1.Secret
 				if err := r.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: specTLS.CABundleSecretRef.Name}, &sec); err != nil {
-					obj.Status.Phase = "Error"
-					obj.Status.Message = fmt.Sprintf("ca bundle secret %s not found: %v", specTLS.CABundleSecretRef.Name, err)
-					obj.Status.ObservedGeneration = obj.Generation
-					_ = r.Status().Update(ctx, &obj)
-					return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+					return r.setDirectoryError(ctx, &obj, fmt.Sprintf("ca bundle secret %s not found: %v", specTLS.CABundleSecretRef.Name, err))
 				}
 				caSecret = &sec
 			} else if specTLS.Verify && usesLDAPS {
-				obj.Status.Phase = "Error"
-				obj.Status.Message = "tls.verify=true requires caBundleSecretRef for ldaps servers"
-				obj.Status.ObservedGeneration = obj.Generation
-				_ = r.Status().Update(ctx, &obj)
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+				return r.setDirectoryError(ctx, &obj, "tls.verify=true requires caBundleSecretRef for ldaps servers")
 			}
 		}
 	}
 
 	dirJSON, err := renderDirectoryJSON(&obj, dirType)
 	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		obj.Status.ObservedGeneration = obj.Generation
-		_ = r.Status().Update(ctx, &obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.setDirectoryError(ctx, &obj, err.Error())
 	}
 
 	smbConf, krb5Conf, err := renderSMBDirectoryConf(&obj, dirType)
 	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		obj.Status.ObservedGeneration = obj.Generation
-		_ = r.Status().Update(ctx, &obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.setDirectoryError(ctx, &obj, err.Error())
 	}
 
 	sssdConf, caBundle, err := renderSSSDConf(&obj, dirType, bindSecret, caSecret)
 	if err != nil {
-		obj.Status.Phase = "Error"
-		obj.Status.Message = err.Error()
-		obj.Status.ObservedGeneration = obj.Generation
-		_ = r.Status().Update(ctx, &obj)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return r.setDirectoryError(ctx, &obj, err.Error())
 	}
 
 	hash := directoryHash(dirJSON, smbConf, krb5Conf, sssdConf, caBundle, bindSecret, caSecret)
@@ -170,10 +140,8 @@ func (r *NASDirectoryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		_ = upsert(ctx, r.Client, &sssdSecret)
 	}
 
-	obj.Status.Phase = "Ready"
-	obj.Status.Message = "OK"
-	obj.Status.AppliedHash = hash
-	obj.Status.ObservedGeneration = obj.Generation
+	connectivityOK, connectivityMsg := checkDirectoryConnectivity(ctx, dirType, obj.Spec.Servers)
+	r.setDirectoryReady(&obj, hash, connectivityOK, connectivityMsg)
 	_ = r.Status().Update(ctx, &obj)
 
 	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
@@ -348,6 +316,97 @@ func directoryHash(dirJSON, smbConf, krb5Conf, sssdConf string, caBundle []byte,
 		h.Write([]byte(caSecret.ResourceVersion))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (r *NASDirectoryReconciler) setDirectoryError(ctx context.Context, obj *nasv1.NASDirectory, msg string) (ctrl.Result, error) {
+	obj.Status.Phase = "Error"
+	obj.Status.Message = msg
+	obj.Status.AppliedHash = ""
+	obj.Status.ObservedGeneration = obj.Generation
+	apiMeta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{
+		Type:               "Applied",
+		Status:             metav1.ConditionFalse,
+		Reason:             "Error",
+		Message:            msg,
+		LastTransitionTime: metav1.Now(),
+	})
+	apiMeta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{
+		Type:               "Connectivity",
+		Status:             metav1.ConditionUnknown,
+		Reason:             "Unknown",
+		Message:            "connectivity not checked",
+		LastTransitionTime: metav1.Now(),
+	})
+	_ = r.Status().Update(ctx, obj)
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+func (r *NASDirectoryReconciler) setDirectoryReady(obj *nasv1.NASDirectory, hash string, connectivityOK bool, connectivityMsg string) {
+	obj.Status.Phase = "Ready"
+	obj.Status.Message = "OK"
+	obj.Status.AppliedHash = hash
+	obj.Status.ObservedGeneration = obj.Generation
+	apiMeta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{
+		Type:               "Applied",
+		Status:             metav1.ConditionTrue,
+		Reason:             "Ready",
+		Message:            "configuration applied",
+		LastTransitionTime: metav1.Now(),
+	})
+	condStatus := metav1.ConditionFalse
+	reason := "Unreachable"
+	if connectivityOK {
+		condStatus = metav1.ConditionTrue
+		reason = "Reachable"
+	}
+	if connectivityMsg == "" {
+		connectivityMsg = "connectivity check completed"
+	}
+	apiMeta.SetStatusCondition(&obj.Status.Conditions, metav1.Condition{
+		Type:               "Connectivity",
+		Status:             condStatus,
+		Reason:             reason,
+		Message:            connectivityMsg,
+		LastTransitionTime: metav1.Now(),
+	})
+}
+
+func checkDirectoryConnectivity(ctx context.Context, dirType string, servers []string) (bool, string) {
+	if dirType == "local" {
+		return true, "local directory"
+	}
+	if len(servers) == 0 {
+		return false, "no directory servers configured"
+	}
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	for _, raw := range servers {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		port := u.Port()
+		if port == "" {
+			switch strings.ToLower(u.Scheme) {
+			case "ldaps":
+				port = "636"
+			default:
+				port = "389"
+			}
+		}
+		addr := net.JoinHostPort(u.Hostname(), port)
+		dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		conn, err := dialer.DialContext(dialCtx, "tcp", addr)
+		cancel()
+		if err == nil {
+			_ = conn.Close()
+			return true, fmt.Sprintf("reachable: %s", addr)
+		}
+	}
+	return false, "no directory servers reachable"
 }
 
 func directoryUsesSecret(dir *nasv1.NASDirectory, secretName string) bool {

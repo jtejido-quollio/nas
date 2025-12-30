@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -312,13 +313,22 @@ func (r *NASShareReconciler) reconcileSMB(ctx context.Context, obj *nasv1.NASSha
 
 	var initContainers []corev1.Container
 	if dirType == "activeDirectory" {
+		statePath := getStringOption(spec.Options, "adJoinStatePath")
+		if statePath == "" {
+			statePath = filepath.Join("/var/lib/nas/samba", obj.GetName())
+		}
 		volumeMounts = append(volumeMounts,
 			corev1.VolumeMount{Name: "directory", MountPath: "/etc/krb5.conf", SubPath: "krb5.conf", ReadOnly: true},
 			corev1.VolumeMount{Name: "samba-state", MountPath: "/var/lib/samba"},
 		)
 		volumes = append(volumes, corev1.Volume{
-			Name:         "samba-state",
-			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			Name: "samba-state",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: statePath,
+					Type: hostPathTypePtr(corev1.HostPathDirectoryOrCreate),
+				},
+			},
 		})
 		initContainers = append(initContainers, corev1.Container{
 			Name:            "smb-join",
@@ -568,6 +578,26 @@ func normalizeNFSOptions(raw string, readOnly bool) string {
 		out = append(out, "rw")
 	}
 	return strings.Join(out, ",")
+}
+
+func getStringOption(opts map[string]any, key string) string {
+	if opts == nil {
+		return ""
+	}
+	val, ok := opts[key]
+	if !ok || val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	}
+}
+
+func hostPathTypePtr(t corev1.HostPathType) *corev1.HostPathType {
+	return &t
 }
 
 func (r *NASShareReconciler) SetupWithManager(mgr ctrl.Manager) error {

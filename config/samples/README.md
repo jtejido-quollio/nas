@@ -1,7 +1,7 @@
-# Phase 0 samples
+# Samples
 
-Phase 0 is about validating the node-agent API on a fresh machine. There are no
-CRDs to apply at this stage.
+This folder contains the default CRD samples used by `make deploy-samples`.
+It also documents the node-agent API checks used in `make samples-smoke`.
 
 Bootstrap helper (optional):
 ```bash
@@ -20,10 +20,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nas-bootstrap.service
 ```
 
-Phase 0 smoke (optional):
+Samples smoke (optional):
 ```bash
-make deploy-phase0
-make phase0-smoke NODE_AGENT_URL=http://<node-ip>:9808
+make deploy-samples
+make samples-smoke NODE_AGENT_URL=http://<node-ip>:9808
 ```
 
 ## Node-agent health and disk discovery

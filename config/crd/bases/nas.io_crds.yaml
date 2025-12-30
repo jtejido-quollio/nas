@@ -37,8 +37,20 @@ spec:
             status:
               type: object
               properties:
+                appliedHash: {type: string}
+                observedGeneration: {type: integer, format: int64}
                 phase: {type: string}
                 message: {type: string}
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type: {type: string}
+                      status: {type: string}
+                      reason: {type: string}
+                      message: {type: string}
+                      lastTransitionTime: {type: string}
                 appliedHash: {type: string}
                 observedGeneration: {type: integer}
       subresources:

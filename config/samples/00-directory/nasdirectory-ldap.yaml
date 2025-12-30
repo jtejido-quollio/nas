@@ -1,19 +1,21 @@
 apiVersion: nas.io/v1alpha1
 kind: NASDirectory
 metadata:
-  name: ad
+  name: ldap
   namespace: nas-system
 spec:
-  type: activeDirectory
+  type: ldap
   servers:
     - ldaps://192.168.1.8:636
   baseDN: DC=nas,DC=local
-  realm: NAS.LOCAL
-  workgroup: NAS
   bind:
-    username: Administrator
+    username: uid=admin,ou=people,dc=nas,dc=local
     secretRef:
-      name: ad-bind
+      name: ldap-bind
+  tls:
+    verify: true
+    caBundleSecretRef:
+      name: ldap-ca
   idMapping:
     strategy: rfc2307
     uidAttribute: uidNumber

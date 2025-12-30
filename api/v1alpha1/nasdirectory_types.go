@@ -58,6 +58,7 @@ type NASDirectoryStatus struct {
 	Message            string `json:"message,omitempty"`
 	AppliedHash        string `json:"appliedHash,omitempty"`
 	ObservedGeneration int64  `json:"observedGeneration,omitempty"`
+	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -179,7 +180,13 @@ func (in *NASDirectorySpec) DeepCopy() *NASDirectorySpec {
 	return out
 }
 
-func (in *NASDirectoryStatus) DeepCopyInto(out *NASDirectoryStatus) { *out = *in }
+func (in *NASDirectoryStatus) DeepCopyInto(out *NASDirectoryStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		out.Conditions = make([]metav1.Condition, len(in.Conditions))
+		copy(out.Conditions, in.Conditions)
+	}
+}
 
 func (in *NASDirectoryStatus) DeepCopy() *NASDirectoryStatus {
 	if in == nil {

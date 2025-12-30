@@ -1,5 +1,5 @@
 @startuml
-title nas-phase2 - Context (Phase 2)
+title nas-samples - Context
 
 skinparam linetype ortho
 skinparam packageStyle rectangle
