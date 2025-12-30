@@ -47,6 +47,7 @@ spec:
                     total: {type: integer, format: int64}
                     used: {type: integer, format: int64}
                     available: {type: integer, format: int64}
+                    rawTotal: {type: integer, format: int64}
                 conditions:
                   type: array
                   items:

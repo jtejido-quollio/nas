@@ -1038,7 +1038,9 @@ export default function App() {
                   const usageTotal = usage?.total ?? 0;
                   const usageUsed = usage?.used ?? 0;
                   const usageAvailable = usage?.available ?? 0;
+                  const usageRawTotal = usage?.rawTotal ?? 0;
                   const hasUsage = usageTotal > 0;
+                  const hasRawTotal = usageRawTotal > 0;
                   const usagePct = hasUsage ? Math.max(0, Math.min(100, Math.round((usageUsed / usageTotal) * 100))) : 0;
 
                   return (
@@ -1099,6 +1101,10 @@ export default function App() {
                           </div>
                           {hasUsage ? (
                             <div className="usage-list">
+                              <div>
+                                <span>Raw capacity</span>
+                                <strong>{hasRawTotal ? formatGiB(usageRawTotal) : "Pending"}</strong>
+                              </div>
                               <div>
                                 <span>Usable capacity</span>
                                 <strong>{formatGiB(usageTotal)}</strong>

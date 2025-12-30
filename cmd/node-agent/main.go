@@ -149,6 +149,7 @@ type PoolUsage struct {
 	Total     int64 `json:"total,omitempty"`
 	Used      int64 `json:"used,omitempty"`
 	Available int64 `json:"available,omitempty"`
+	RawTotal  int64 `json:"rawTotal,omitempty"`
 }
 
 type PoolVdev struct {
@@ -871,6 +872,19 @@ func listZPoolNames() ([]string, string, error) {
 }
 
 func getZPoolUsage(pool string) (*PoolUsage, string, error) {
+	var rawTotal int64
+	if devices, _, rawErr := listPoolLeafDevices(pool); rawErr == nil {
+		seen := make(map[string]struct{}, len(devices))
+		for _, dev := range devices {
+			if _, ok := seen[dev]; ok {
+				continue
+			}
+			seen[dev] = struct{}{}
+			if size, err := blockdevSizeBytes(dev); err == nil && size > 0 {
+				rawTotal += size
+			}
+		}
+	}
 	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "list", "-Hp", "-o", "used,available", pool)
 	if err == nil {
 		line := strings.TrimSpace(out)
@@ -879,7 +893,7 @@ func getZPoolUsage(pool string) (*PoolUsage, string, error) {
 			if len(fields) >= 2 {
 				used := parseInt64(fields[0])
 				available := parseInt64(fields[1])
-				return &PoolUsage{Total: used + available, Used: used, Available: available}, out, nil
+				return &PoolUsage{Total: used + available, Used: used, Available: available, RawTotal: rawTotal}, out, nil
 			}
 		}
 	}
@@ -898,7 +912,42 @@ func getZPoolUsage(pool string) (*PoolUsage, string, error) {
 	total := parseInt64(fields[0])
 	used := parseInt64(fields[1])
 	available := parseInt64(fields[2])
-	return &PoolUsage{Total: total, Used: used, Available: available}, out2, nil
+	return &PoolUsage{Total: total, Used: used, Available: available, RawTotal: rawTotal}, out2, nil
+}
+
+func listPoolLeafDevices(pool string) ([]string, string, error) {
+	raw, err := runCmdCombined(context.Background(), 30*time.Second, "zpool", "status", "-P", pool)
+	if err != nil {
+		return nil, raw, fmt.Errorf("zpool status -P failed: %w", err)
+	}
+	var devices []string
+	inConfig := false
+	for _, ln := range strings.Split(raw, "\n") {
+		s := strings.TrimSpace(ln)
+		if s == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(s, "config:"):
+			inConfig = true
+			continue
+		case strings.HasPrefix(s, "errors:"):
+			inConfig = false
+			continue
+		}
+		if !inConfig {
+			continue
+		}
+		fields := strings.Fields(s)
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
+		if strings.HasPrefix(name, "/dev/") {
+			devices = append(devices, name)
+		}
+	}
+	return devices, raw, nil
 }
 
 func listSnapshotNames(dataset string) ([]string, string, error) {

@@ -37,6 +37,7 @@ type ZPoolUsage struct {
 	Total     int64 `json:"total,omitempty"`
 	Used      int64 `json:"used,omitempty"`
 	Available int64 `json:"available,omitempty"`
+	RawTotal  int64 `json:"rawTotal,omitempty"`
 }
 
 func (in *ZPoolUsage) DeepCopyInto(out *ZPoolUsage) {

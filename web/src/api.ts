@@ -8,7 +8,7 @@ export type ZPool = {
   status?: {
     phase?: string;
     message?: string;
-    usage?: { total?: number; used?: number; available?: number };
+    usage?: { total?: number; used?: number; available?: number; rawTotal?: number };
   };
 };
 
