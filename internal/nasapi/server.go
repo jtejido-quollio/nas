@@ -193,7 +193,12 @@ func (s *Server) handleDisks(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var disks nodeAgentDisksResponse
-	if err := s.fetchNodeAgentJSON(ctx, "/v1/disks", &disks); err != nil {
+	path := "/v1/disks"
+	refresh := strings.TrimSpace(r.URL.Query().Get("refresh"))
+	if refresh == "1" || strings.EqualFold(refresh, "true") {
+		path = "/v1/disks?refresh=1"
+	}
+	if err := s.fetchNodeAgentJSON(ctx, path, &disks); err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}

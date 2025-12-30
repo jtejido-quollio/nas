@@ -312,7 +312,7 @@ export default function App() {
   const [disksModalOpen, setDisksModalOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (forceDisks = false) => {
     setLoading(true);
     setSnapshotsLoading(true);
     setDiskLoading(true);
@@ -322,7 +322,7 @@ export default function App() {
       const [overviewResult, snapshotResult, disksResult] = await Promise.allSettled([
         fetchOverview(),
         listZSnapshots(),
-        listDisks()
+        listDisks(forceDisks)
       ]);
       if (overviewResult.status === "fulfilled") {
         setOverview(overviewResult.value);
@@ -729,7 +729,7 @@ export default function App() {
                 <span className="health-count">{errorCount}</span>
               </div>
             )}
-            <button className="ghost" onClick={refreshAll} disabled={busy}>
+            <button className="ghost" onClick={() => refreshAll(true)} disabled={busy}>
               Sync
             </button>
           </div>

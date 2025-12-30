@@ -90,8 +90,9 @@ export function fetchOverview(): Promise<Overview> {
   return request<Overview>("/v1/overview");
 }
 
-export function listDisks(): Promise<DiskInventory> {
-  return request<DiskInventory>("/v1/disks");
+export function listDisks(refresh = false): Promise<DiskInventory> {
+  const suffix = refresh ? "?refresh=1" : "";
+  return request<DiskInventory>(`/v1/disks${suffix}`, { cache: "no-store" });
 }
 
 type CreateRequest<T> = {
