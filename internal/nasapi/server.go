@@ -70,6 +70,8 @@ func NewServer(c client.Client, namespace, webRoot string, logger *log.Logger) *
 	mux.HandleFunc("/v1/zpools/", s.handleZPool)
 	mux.HandleFunc("/v1/zdatasets", s.handleZDatasets)
 	mux.HandleFunc("/v1/zdatasets/", s.handleZDataset)
+	mux.HandleFunc("/v1/zsnapshots", s.handleZSnapshots)
+	mux.HandleFunc("/v1/zsnapshots/", s.handleZSnapshot)
 	mux.HandleFunc("/v1/nasshares", s.handleNASShares)
 	mux.HandleFunc("/v1/nasshares/", s.handleNASShare)
 	mux.HandleFunc("/v1/nasdirectories", s.handleNASDirectories)
@@ -206,6 +208,39 @@ func (s *Server) handleZDataset(w http.ResponseWriter, r *http.Request) {
 		return obj, nil
 	}, func(ctx context.Context, name string) error {
 		obj := &nasv1.ZDataset{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.namespace}}
+		return s.client.Delete(ctx, obj)
+	})
+}
+
+func (s *Server) handleZSnapshots(w http.ResponseWriter, r *http.Request) {
+	handleListOrCreate(s, w, r, func(ctx context.Context, ns string) (any, error) {
+		var list nasv1.ZSnapshotList
+		if err := s.client.List(ctx, &list, client.InNamespace(ns)); err != nil {
+			return nil, err
+		}
+		return list.Items, nil
+	}, func(ctx context.Context, req createRequest[nasv1.ZSnapshotSpec]) (any, error) {
+		obj := nasv1.ZSnapshot{
+			TypeMeta: metav1.TypeMeta{APIVersion: "nas.io/v1alpha1", Kind: "ZSnapshot"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      req.Name,
+				Namespace: nsOrDefault(req.Namespace, s.namespace),
+			},
+			Spec: req.Spec,
+		}
+		return obj, upsertResource(ctx, s.client, &obj)
+	})
+}
+
+func (s *Server) handleZSnapshot(w http.ResponseWriter, r *http.Request) {
+	s.handleGetOrDelete(w, r, "/v1/zsnapshots/", func(ctx context.Context, name string) (any, error) {
+		var obj nasv1.ZSnapshot
+		if err := s.client.Get(ctx, namespacedName(s.namespace, name), &obj); err != nil {
+			return nil, err
+		}
+		return obj, nil
+	}, func(ctx context.Context, name string) error {
+		obj := &nasv1.ZSnapshot{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.namespace}}
 		return s.client.Delete(ctx, obj)
 	})
 }
