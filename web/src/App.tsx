@@ -75,7 +75,7 @@ export default function App() {
     <div className="app">
       <aside className="nav">
         <div className="nav-brand">
-          <span className="brand-mark">Mnemosyne</span>
+          <img className="brand-logo" src="/amphora-logo.png" alt="Amphora logo" />
           <span className="brand-sub">NAS Control Plane</span>
         </div>
         <div className="nav-section">Core</div>
