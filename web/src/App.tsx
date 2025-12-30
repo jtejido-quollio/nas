@@ -183,6 +183,28 @@ function minDevicesForLayout(layout: PoolWizardState["layout"]) {
   }
 }
 
+function validatePoolWizardStep(state: PoolWizardState, step: number) {
+  if (step === 0) {
+    const name = state.name.trim();
+    if (name.length === 0) return "Pool name is required.";
+    if (!/^[a-z0-9][a-z0-9-]{0,49}$/.test(name)) {
+      return "Pool name must be lowercase, up to 50 chars, and may include dashes.";
+    }
+    if (state.nodeName.trim() === "") {
+      return "Target node is required for pool creation.";
+    }
+  }
+  if (step === 1) {
+    if (!state.layout) return "Select a data layout to continue.";
+    const dataDevices = parseDeviceList(state.dataDevices);
+    const minDevices = minDevicesForLayout(state.layout);
+    if (dataDevices.length < minDevices) {
+      return `Layout ${layoutLabel(state.layout)} needs at least ${minDevices} disk(s).`;
+    }
+  }
+  return null;
+}
+
 function ResourceTable<T extends { metadata: { name: string } }>(props: {
   items: T[];
   columns: Array<Column<T>>;
@@ -342,10 +364,20 @@ export default function App() {
 
   const updatePoolWizard = (changes: Partial<PoolWizardState>) => {
     setPoolWizard((current) => (current ? { ...current, ...changes } : current));
+    if (poolWizardError) {
+      setPoolWizardError(null);
+    }
   };
 
   const handlePoolWizardStep = (direction: "next" | "back") => {
     if (!poolWizard) return;
+    if (direction === "next") {
+      const message = validatePoolWizardStep(poolWizard, poolWizard.step);
+      if (message) {
+        setPoolWizardError(message);
+        return;
+      }
+    }
     const step = direction === "next" ? poolWizard.step + 1 : poolWizard.step - 1;
     updatePoolWizard({ step: Math.min(Math.max(step, 0), poolWizardSteps.length - 1) });
   };
@@ -1174,7 +1206,15 @@ export default function App() {
                     <h4>General Info</h4>
                     <div className="wizard-grid">
                       <label className="form-field">
-                        <span>Pool name</span>
+                        <span className="field-label">
+                          Pool name *
+                          <span
+                            className="field-help"
+                            title="Unique, lowercase ZFS pool identifier (max 50 chars)."
+                          >
+                            ?
+                          </span>
+                        </span>
                         <input
                           type="text"
                           value={poolWizard.name}
@@ -1183,7 +1223,15 @@ export default function App() {
                         />
                       </label>
                       <label className="form-field">
-                        <span>Target node</span>
+                        <span className="field-label">
+                          Target node *
+                          <span
+                            className="field-help"
+                            title="Kubernetes node name where the pool will be created (single-node appliances typically have one)."
+                          >
+                            ?
+                          </span>
+                        </span>
                         <input
                           type="text"
                           value={poolWizard.nodeName}
@@ -1199,7 +1247,12 @@ export default function App() {
                         onChange={(event) => updatePoolWizard({ encryption: event.target.checked })}
                         disabled
                       />
-                      <span>Encryption (planned)</span>
+                      <span className="field-label">
+                        Encryption (planned)
+                        <span className="field-help" title="Encrypt pool data at rest using ZFS native encryption.">
+                          ?
+                        </span>
+                      </span>
                     </label>
                     <p className="wizard-hint">
                       Pool names must be lowercase and are permanent. Encryption will be supported in a future release.
@@ -1211,7 +1264,15 @@ export default function App() {
                   <div className="wizard-section">
                     <h4>Data VDEV</h4>
                     <label className="form-field">
-                      <span>Layout</span>
+                      <span className="field-label">
+                        Layout *
+                        <span
+                          className="field-help"
+                          title="VDEV redundancy layout. Mirror and RAIDZ provide fault tolerance."
+                        >
+                          ?
+                        </span>
+                      </span>
                       <select
                         value={poolWizard.layout}
                         onChange={(event) =>
@@ -1232,15 +1293,30 @@ export default function App() {
                           Not yet available. Disk inventory sync is required to enable automated selection.
                         </p>
                         <label className="form-field">
-                          <span>Disk size</span>
+                          <span className="field-label">
+                            Disk size
+                            <span className="field-help" title="Filter disks by size for automated selection.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
-                          <span>Width</span>
+                          <span className="field-label">
+                            Width
+                            <span className="field-help" title="Number of disks per data VDEV.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
-                          <span>Number of VDEVs</span>
+                          <span className="field-label">
+                            Number of VDEVs
+                            <span className="field-help" title="How many data VDEVs to create in this pool.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                       </div>
@@ -1250,7 +1326,12 @@ export default function App() {
                           Provide device paths separated by spaces or new lines.
                         </p>
                         <label className="form-field">
-                          <span>Device paths</span>
+                          <span className="field-label">
+                            Device paths *
+                            <span className="field-help" title="Absolute device paths used to form the data VDEV.">
+                              ?
+                            </span>
+                          </span>
                           <textarea
                             rows={6}
                             value={poolWizard.dataDevices}
@@ -1265,19 +1346,39 @@ export default function App() {
                           Not yet available. dRAID will be enabled once node-agent supports inventory + layout helpers.
                         </p>
                         <label className="form-field">
-                          <span>Data devices</span>
+                          <span className="field-label">
+                            Data devices
+                            <span className="field-help" title="Number of data disks per dRAID stripe.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
-                          <span>Distributed hot spares</span>
+                          <span className="field-label">
+                            Distributed hot spares
+                            <span className="field-help" title="Spare capacity reserved across the dRAID vdev.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
-                          <span>Children</span>
+                          <span className="field-label">
+                            Children
+                            <span className="field-help" title="Total disks allocated to the dRAID vdev.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
-                          <span>Number of VDEVs</span>
+                          <span className="field-label">
+                            Number of VDEVs
+                            <span className="field-help" title="Number of dRAID vdevs in the pool.">
+                              ?
+                            </span>
+                          </span>
                           <input type="text" value="Not yet available" disabled />
                         </label>
                       </div>
@@ -1290,7 +1391,12 @@ export default function App() {
                     <h4>Log VDEV (Optional)</h4>
                     <p className="wizard-hint">Add high-speed devices to accelerate synchronous writes.</p>
                     <label className="form-field">
-                      <span>Log device paths</span>
+                      <span className="field-label">
+                        Log device paths
+                        <span className="field-help" title="Dedicated log devices (SLOG) for sync write acceleration.">
+                          ?
+                        </span>
+                      </span>
                       <textarea
                         rows={5}
                         value={poolWizard.logDevices}
@@ -1306,7 +1412,12 @@ export default function App() {
                     <h4>Cache VDEV (Optional)</h4>
                     <p className="wizard-hint">Add L2ARC cache devices for read-heavy workloads.</p>
                     <label className="form-field">
-                      <span>Cache device paths</span>
+                      <span className="field-label">
+                        Cache device paths
+                        <span className="field-help" title="L2ARC cache devices for read-heavy workloads.">
+                          ?
+                        </span>
+                      </span>
                       <textarea
                         rows={5}
                         value={poolWizard.cacheDevices}
@@ -1322,7 +1433,12 @@ export default function App() {
                     <h4>Spare VDEV (Optional)</h4>
                     <p className="wizard-hint">Add hot spare devices to automatically replace failed disks.</p>
                     <label className="form-field">
-                      <span>Spare device paths</span>
+                      <span className="field-label">
+                        Spare device paths
+                        <span className="field-help" title="Hot spare devices that can replace failed disks.">
+                          ?
+                        </span>
+                      </span>
                       <textarea
                         rows={5}
                         value={poolWizard.spareDevices}
