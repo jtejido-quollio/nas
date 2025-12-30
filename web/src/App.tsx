@@ -39,7 +39,7 @@ type PoolWizardState = {
   name: string;
   nodeName: string;
   encryption: boolean;
-  layout: "stripe" | "mirror" | "raidz1" | "raidz2";
+  layout: "stripe" | "mirror" | "raidz1" | "raidz2" | "raidz3" | "draid1" | "draid2" | "draid3";
   dataDevices: string;
   logDevices: string;
   cacheDevices: string;
@@ -145,7 +145,11 @@ function directoryConnectivity(directory: NASDirectory) {
   return condition.status === "True" ? "connected" : "offline";
 }
 
-const dataLayouts = new Set(["stripe", "mirror", "raidz1", "raidz2"]);
+const dataLayouts = new Set(["stripe", "mirror", "raidz1", "raidz2", "raidz3", "draid1", "draid2", "draid3"]);
+
+function isDraidLayout(layout: PoolWizardState["layout"]) {
+  return layout.startsWith("draid");
+}
 
 function layoutLabel(layout?: string) {
   const normalized = layout?.toLowerCase() ?? "stripe";
@@ -156,6 +160,14 @@ function layoutLabel(layout?: string) {
       return "RAIDZ1";
     case "raidz2":
       return "RAIDZ2";
+    case "raidz3":
+      return "RAIDZ3";
+    case "draid1":
+      return "dRAID1";
+    case "draid2":
+      return "dRAID2";
+    case "draid3":
+      return "dRAID3";
     case "stripe":
     default:
       return "Stripe";
@@ -177,6 +189,8 @@ function minDevicesForLayout(layout: PoolWizardState["layout"]) {
       return 3;
     case "raidz2":
       return 4;
+    case "raidz3":
+      return 5;
     case "stripe":
     default:
       return 1;
@@ -195,6 +209,9 @@ function validatePoolWizardStep(state: PoolWizardState, step: number) {
     }
   }
   if (step === 1) {
+    if (isDraidLayout(state.layout)) {
+      return "dRAID layouts are not yet available. Select Stripe, Mirror, or RAIDZ.";
+    }
     if (!state.layout) return "Select a data layout to continue.";
     const dataDevices = parseDeviceList(state.dataDevices);
     const minDevices = minDevicesForLayout(state.layout);
@@ -384,6 +401,10 @@ export default function App() {
 
   const handlePoolWizardCreate = async () => {
     if (!poolWizard) return;
+    if (isDraidLayout(poolWizard.layout)) {
+      setPoolWizardError("dRAID layouts are not yet available in this release.");
+      return;
+    }
     const name = poolWizard.name.trim();
     if (name.length === 0) {
       setPoolWizardError("Pool name is required.");
@@ -847,6 +868,7 @@ export default function App() {
                   <span className="storage-pill">Mirror</span>
                   <span className="storage-pill">RAIDZ1</span>
                   <span className="storage-pill">RAIDZ2</span>
+                  <span className="storage-pill">RAIDZ3</span>
                   <span className="storage-pill muted">dRAID (not yet available)</span>
                 </div>
               </div>
@@ -1283,6 +1305,10 @@ export default function App() {
                         <option value="mirror">Mirror</option>
                         <option value="raidz1">RAIDZ1</option>
                         <option value="raidz2">RAIDZ2</option>
+                        <option value="raidz3">RAIDZ3</option>
+                        <option value="draid1">dRAID1</option>
+                        <option value="draid2">dRAID2</option>
+                        <option value="draid3">dRAID3</option>
                       </select>
                     </label>
 
@@ -1320,68 +1346,72 @@ export default function App() {
                           <input type="text" value="Not yet available" disabled />
                         </label>
                       </div>
-                      <div className="wizard-card">
-                        <div className="wizard-card-title">Manual Disk Selection</div>
-                        <p className="wizard-card-sub">
-                          Provide device paths separated by spaces or new lines.
-                        </p>
-                        <label className="form-field">
-                          <span className="field-label">
-                            Device paths *
-                            <span className="field-help" title="Absolute device paths used to form the data VDEV.">
-                              ?
+                      {!isDraidLayout(poolWizard.layout) && (
+                        <div className="wizard-card">
+                          <div className="wizard-card-title">Manual Disk Selection</div>
+                          <p className="wizard-card-sub">
+                            Provide device paths separated by spaces or new lines.
+                          </p>
+                          <label className="form-field">
+                            <span className="field-label">
+                              Device paths *
+                              <span className="field-help" title="Absolute device paths used to form the data VDEV.">
+                                ?
+                              </span>
                             </span>
-                          </span>
-                          <textarea
-                            rows={6}
-                            value={poolWizard.dataDevices}
-                            placeholder="/dev/sdb /dev/sdc"
-                            onChange={(event) => updatePoolWizard({ dataDevices: event.target.value })}
-                          />
-                        </label>
-                      </div>
-                      <div className="wizard-card muted">
-                        <div className="wizard-card-title">dRAID Settings</div>
-                        <p className="wizard-card-sub">
-                          Not yet available. dRAID will be enabled once node-agent supports inventory + layout helpers.
-                        </p>
-                        <label className="form-field">
-                          <span className="field-label">
-                            Data devices
-                            <span className="field-help" title="Number of data disks per dRAID stripe.">
-                              ?
+                            <textarea
+                              rows={6}
+                              value={poolWizard.dataDevices}
+                              placeholder="/dev/sdb /dev/sdc"
+                              onChange={(event) => updatePoolWizard({ dataDevices: event.target.value })}
+                            />
+                          </label>
+                        </div>
+                      )}
+                      {isDraidLayout(poolWizard.layout) && (
+                        <div className="wizard-card muted">
+                          <div className="wizard-card-title">dRAID Settings</div>
+                          <p className="wizard-card-sub">
+                            Not yet available. dRAID will be enabled once node-agent supports inventory + layout helpers.
+                          </p>
+                          <label className="form-field">
+                            <span className="field-label">
+                              Data devices
+                              <span className="field-help" title="Number of data disks per dRAID stripe.">
+                                ?
+                              </span>
                             </span>
-                          </span>
-                          <input type="text" value="Not yet available" disabled />
-                        </label>
-                        <label className="form-field">
-                          <span className="field-label">
-                            Distributed hot spares
-                            <span className="field-help" title="Spare capacity reserved across the dRAID vdev.">
-                              ?
+                            <input type="text" value="Not yet available" disabled />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-label">
+                              Distributed hot spares
+                              <span className="field-help" title="Spare capacity reserved across the dRAID vdev.">
+                                ?
+                              </span>
                             </span>
-                          </span>
-                          <input type="text" value="Not yet available" disabled />
-                        </label>
-                        <label className="form-field">
-                          <span className="field-label">
-                            Children
-                            <span className="field-help" title="Total disks allocated to the dRAID vdev.">
-                              ?
+                            <input type="text" value="Not yet available" disabled />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-label">
+                              Children
+                              <span className="field-help" title="Total disks allocated to the dRAID vdev.">
+                                ?
+                              </span>
                             </span>
-                          </span>
-                          <input type="text" value="Not yet available" disabled />
-                        </label>
-                        <label className="form-field">
-                          <span className="field-label">
-                            Number of VDEVs
-                            <span className="field-help" title="Number of dRAID vdevs in the pool.">
-                              ?
+                            <input type="text" value="Not yet available" disabled />
+                          </label>
+                          <label className="form-field">
+                            <span className="field-label">
+                              Number of VDEVs
+                              <span className="field-help" title="Number of dRAID vdevs in the pool.">
+                                ?
+                              </span>
                             </span>
-                          </span>
-                          <input type="text" value="Not yet available" disabled />
-                        </label>
-                      </div>
+                            <input type="text" value="Not yet available" disabled />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
