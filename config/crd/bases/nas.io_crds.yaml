@@ -51,8 +51,6 @@ spec:
                       reason: {type: string}
                       message: {type: string}
                       lastTransitionTime: {type: string}
-                appliedHash: {type: string}
-                observedGeneration: {type: integer}
       subresources:
         status: {}
 ---
