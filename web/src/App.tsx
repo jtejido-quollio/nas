@@ -296,6 +296,7 @@ export default function App() {
   const suggestedNodeName = pools[0]?.spec.nodeName ?? "";
   const diskCount = diskInventory?.count ?? diskInventory?.disks?.length ?? 0;
   const diskUpdated = diskInventory?.updated ?? "";
+  const diskSelectionEnabled = false;
 
   const { errorCount, healthLabel } = useMemo(() => {
     const badPools = pools.filter((pool) => statusTone(pool.status?.phase) === "bad");
@@ -787,16 +788,19 @@ export default function App() {
               <div className="storage-card">
                 <div className="storage-card-title">Unassigned Disks</div>
                 <div className="storage-card-value">
-                  {diskLoading ? "Loading" : diskError ? "N/A" : diskCount}
+                  {diskSelectionEnabled ? (diskLoading ? "Loading" : diskError ? "N/A" : diskCount) : "N/A"}
                 </div>
                 <div className="storage-card-sub">
-                  {diskLoading && "Syncing disk inventory from node-agent."}
-                  {!diskLoading && diskError && "Disk inventory unavailable. Check node-agent connectivity."}
-                  {!diskLoading &&
+                  {diskSelectionEnabled && diskLoading && "Syncing disk inventory from node-agent."}
+                  {diskSelectionEnabled && !diskLoading && diskError && "Disk inventory unavailable. Check node-agent connectivity."}
+                  {diskSelectionEnabled &&
+                    !diskLoading &&
                     !diskError &&
                     (diskCount === 0
                       ? "No disks discovered yet. Attach disks to the node to create a pool."
                       : `Discovered ${diskCount} disks${diskUpdated ? ` · Updated ${diskUpdated}` : ""}.`)}
+                  {!diskSelectionEnabled &&
+                    "Disk inventory is not synced yet. Connect node-agent disk discovery to enable automated selection."}
                 </div>
                 <button className="table-button" onClick={openPoolWizard} disabled={busy}>
                   Add to Pool
@@ -811,7 +815,7 @@ export default function App() {
                   <span className="storage-pill">Mirror</span>
                   <span className="storage-pill">RAIDZ1</span>
                   <span className="storage-pill">RAIDZ2</span>
-                  <span className="storage-pill muted">dRAID (soon)</span>
+                  <span className="storage-pill muted">dRAID (not yet available)</span>
                 </div>
               </div>
             </div>
@@ -1224,18 +1228,20 @@ export default function App() {
                     <div className="wizard-grid">
                       <div className="wizard-card muted">
                         <div className="wizard-card-title">Automated Disk Selection</div>
-                        <p className="wizard-card-sub">Connect node-agent disk inventory to enable this workflow.</p>
+                        <p className="wizard-card-sub">
+                          Not yet available. Disk inventory sync is required to enable automated selection.
+                        </p>
                         <label className="form-field">
                           <span>Disk size</span>
-                          <input type="text" value="Disk inventory required" disabled />
+                          <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
                           <span>Width</span>
-                          <input type="text" value="N/A" disabled />
+                          <input type="text" value="Not yet available" disabled />
                         </label>
                         <label className="form-field">
                           <span>Number of VDEVs</span>
-                          <input type="text" value="N/A" disabled />
+                          <input type="text" value="Not yet available" disabled />
                         </label>
                       </div>
                       <div className="wizard-card">
@@ -1251,6 +1257,28 @@ export default function App() {
                             placeholder="/dev/sdb /dev/sdc"
                             onChange={(event) => updatePoolWizard({ dataDevices: event.target.value })}
                           />
+                        </label>
+                      </div>
+                      <div className="wizard-card muted">
+                        <div className="wizard-card-title">dRAID Settings</div>
+                        <p className="wizard-card-sub">
+                          Not yet available. dRAID will be enabled once node-agent supports inventory + layout helpers.
+                        </p>
+                        <label className="form-field">
+                          <span>Data devices</span>
+                          <input type="text" value="Not yet available" disabled />
+                        </label>
+                        <label className="form-field">
+                          <span>Distributed hot spares</span>
+                          <input type="text" value="Not yet available" disabled />
+                        </label>
+                        <label className="form-field">
+                          <span>Children</span>
+                          <input type="text" value="Not yet available" disabled />
+                        </label>
+                        <label className="form-field">
+                          <span>Number of VDEVs</span>
+                          <input type="text" value="Not yet available" disabled />
                         </label>
                       </div>
                     </div>
