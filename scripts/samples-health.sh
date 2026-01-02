@@ -28,6 +28,103 @@ require_service() {
   fi
 }
 
+require_items() {
+  local kind="$1"
+  local names=""
+  names="$(${KUBECTL_BIN} -n "${NAMESPACE}" get "$kind" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)"
+  if [[ -z "$names" ]]; then
+    echo "Missing expected resources for $kind" >&2
+    exit 1
+  fi
+}
+
+check_phase() {
+  local kind="$1"
+  local expected="$2"
+  local start
+  local rows
+  start=$(date +%s)
+  while true; do
+    rows="$(${KUBECTL_BIN} -n "${NAMESPACE}" get "$kind" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\t"}{.status.message}{"\n"}{end}' 2>/dev/null || true)"
+    if [[ -z "$rows" ]]; then
+      if (( $(date +%s) - start > 120 )); then
+        echo "Missing $kind resources" >&2
+        exit 1
+      fi
+      sleep 5
+      continue
+    fi
+
+    local all_ok="true"
+    while IFS=$'\t' read -r name phase message; do
+      if [[ -z "$name" ]]; then
+        continue
+      fi
+      if [[ -z "$phase" ]]; then
+        all_ok="false"
+        continue
+      fi
+      if [[ "$phase" == "Error" || "$phase" == "Failed" ]]; then
+        echo "$kind/$name failed: ${message:-no status message}" >&2
+        exit 1
+      fi
+      if [[ "$phase" != "$expected" ]]; then
+        all_ok="false"
+      fi
+    done <<< "$rows"
+
+    if [[ "$all_ok" == "true" ]]; then
+      return 0
+    fi
+    if (( $(date +%s) - start > 180 )); then
+      echo "$kind not ready (expected phase '$expected')" >&2
+      echo "$rows" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
+check_snapshot_schedule() {
+  local start
+  local rows
+  start=$(date +%s)
+  while true; do
+    rows="$(${KUBECTL_BIN} -n "${NAMESPACE}" get zsnapshotschedule -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.message}{"\t"}{.status.lastSnapshotName}{"\n"}{end}' 2>/dev/null || true)"
+    if [[ -z "$rows" ]]; then
+      if (( $(date +%s) - start > 120 )); then
+        echo "Missing zsnapshotschedule resources" >&2
+        exit 1
+      fi
+      sleep 5
+      continue
+    fi
+
+    local all_ok="true"
+    while IFS=$'\t' read -r name message last_snap; do
+      if [[ -z "$name" ]]; then
+        continue
+      fi
+      if [[ "$message" != "OK" ]]; then
+        all_ok="false"
+      fi
+      if [[ -z "$last_snap" ]]; then
+        all_ok="false"
+      fi
+    done <<< "$rows"
+
+    if [[ "$all_ok" == "true" ]]; then
+      return 0
+    fi
+    if (( $(date +%s) - start > 240 )); then
+      echo "zsnapshotschedule not ready (missing OK message or lastSnapshotName)" >&2
+      echo "$rows" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
 check_zfs_prop() {
   local dataset="$1"
   local prop="$2"
@@ -80,6 +177,23 @@ ${KUBECTL_BIN} -n "${NAMESPACE}" get pods -o wide
 
 log "Sample CRs"
 ${KUBECTL_BIN} -n "${NAMESPACE}" get zpool,zdataset,nasshare,nasdirectory,nasuser,nasgroup,zsnapshotschedule,zsnapshotrestore 2>/dev/null || true
+
+log "Sample CR readiness"
+require_items zpool
+require_items zdataset
+require_items nasshare
+require_items nasdirectory
+require_items nasuser
+require_items nasgroup
+require_items zsnapshotschedule
+require_items zsnapshotrestore
+
+check_phase zpool "Ready"
+check_phase zdataset "Ready"
+check_phase nasshare "Ready"
+check_phase nasdirectory "Ready"
+check_phase zsnapshotrestore "Succeeded"
+check_snapshot_schedule
 
 node_agent_pod="$(${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app=nas-node-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 if [[ -z "$node_agent_pod" ]]; then
