@@ -202,6 +202,11 @@ type ZSnapshotDestroyRequest struct {
 	Snapshot string `json:"snapshot"`
 }
 
+type ZSnapshotCloneRequest struct {
+	SourceSnapshot string `json:"sourceSnapshot"`
+	TargetDataset  string `json:"targetDataset"`
+}
+
 type ZSnapshotListResponse struct {
 	OK    bool     `json:"ok"`
 	Error string   `json:"error,omitempty"`
@@ -641,6 +646,28 @@ func main() {
 			return
 		}
 		out, err := runCmdCombined(r.Context(), 120*time.Second, "zfs", "destroy", strings.TrimSpace(req.Snapshot))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ZPoolOpResponse{OK: false, Output: out, Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, ZPoolOpResponse{OK: true, Output: out})
+	})
+
+	mux.HandleFunc("/v1/zfs/snapshot/clone", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req ZSnapshotCloneRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, ZPoolOpResponse{OK: false, Error: "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.SourceSnapshot) == "" || strings.TrimSpace(req.TargetDataset) == "" {
+			writeJSON(w, http.StatusBadRequest, ZPoolOpResponse{OK: false, Error: "sourceSnapshot and targetDataset required"})
+			return
+		}
+		out, err := runCmdCombined(r.Context(), 120*time.Second, "zfs", "clone", strings.TrimSpace(req.SourceSnapshot), strings.TrimSpace(req.TargetDataset))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZPoolOpResponse{OK: false, Output: out, Error: err.Error()})
 			return

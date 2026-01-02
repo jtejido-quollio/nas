@@ -88,7 +88,9 @@ check_phase() {
 check_snapshot_schedule() {
   local start
   local rows
+  local candidate
   start=$(date +%s)
+  candidate=""
   while true; do
     rows="$(${KUBECTL_BIN} -n "${NAMESPACE}" get zsnapshotschedule -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.message}{"\t"}{.status.lastSnapshotName}{"\n"}{end}' 2>/dev/null || true)"
     if [[ -z "$rows" ]]; then
@@ -110,10 +112,13 @@ check_snapshot_schedule() {
       fi
       if [[ -z "$last_snap" ]]; then
         all_ok="false"
+      elif [[ -z "$candidate" ]]; then
+        candidate="$last_snap"
       fi
     done <<< "$rows"
 
     if [[ "$all_ok" == "true" ]]; then
+      LAST_SNAPSHOT_NAME="$candidate"
       return 0
     fi
     if (( $(date +%s) - start > 240 )); then
@@ -123,6 +128,27 @@ check_snapshot_schedule() {
     fi
     sleep 5
   done
+}
+
+patch_clone_restores() {
+  local snapshot_name="$1"
+  local rows
+  if [[ -z "$snapshot_name" ]]; then
+    return 0
+  fi
+  rows="$(${KUBECTL_BIN} -n "${NAMESPACE}" get zsnapshotrestore -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.mode}{"\t"}{.spec.sourceSnapshot}{"\n"}{end}' 2>/dev/null || true)"
+  while IFS=$'\t' read -r name mode source; do
+    if [[ -z "$name" ]]; then
+      continue
+    fi
+    if [[ "$mode" != "clone" ]]; then
+      continue
+    fi
+    if [[ -z "$source" || "$source" == "AUTO" ]]; then
+      ${KUBECTL_BIN} -n "${NAMESPACE}" patch zsnapshotrestore "$name" --type merge \
+        -p "{\"spec\":{\"sourceSnapshot\":\"$snapshot_name\"}}" >/dev/null
+    fi
+  done <<< "$rows"
 }
 
 check_zfs_prop() {
@@ -192,8 +218,9 @@ check_phase zpool "Ready"
 check_phase zdataset "Ready"
 check_phase nasshare "Ready"
 check_phase nasdirectory "Ready"
-check_phase zsnapshotrestore "Succeeded"
 check_snapshot_schedule
+patch_clone_restores "${LAST_SNAPSHOT_NAME:-}"
+check_phase zsnapshotrestore "Succeeded"
 
 node_agent_pod="$(${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app=nas-node-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 if [[ -z "$node_agent_pod" ]]; then
