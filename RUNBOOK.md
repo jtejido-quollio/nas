@@ -54,8 +54,9 @@ export KUBECTL="sudo k3s kubectl"
 alias kubectl="sudo k3s kubectl"
 ```
 
-### Samples smoke (optional)
+### Base deploy + samples smoke (optional)
 ```bash
+make deploy
 make deploy-samples
 make samples-smoke NODE_AGENT_URL=http://<node-ip>:9808
 ```
@@ -112,6 +113,7 @@ The samples include:
 * NASShare resources (SMB + NFS) backed by ZFS datasets / PVCs
 
 ```bash
+make deploy
 make deploy-samples
 ```
 
@@ -329,6 +331,13 @@ kubectl -n nas-system describe zsnapshotrestore home-restore-clone
 ## 14) Cleanup
 ```bash
 make cleanup-samples
+```
+This removes sample CRs and sample-generated SMB resources, but keeps CRDs and core services
+(nas-api, nas-operator, nas-node-agent) so you can continue testing via the UI.
+
+Full reset (removes core stack + CRDs):
+```bash
+make cleanup
 ```
 
 ## Notes / gotchas

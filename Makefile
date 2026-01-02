@@ -19,7 +19,7 @@ IMG_OPERATOR ?= localhost/nas-operator:dev
 IMG_API ?= localhost/nas-api:dev
 
 .PHONY: fmt tidy build images save-images load-images \
-  deploy-samples samples-smoke cleanup-samples \
+  deploy deploy-samples samples-smoke cleanup-samples cleanup \
   deploy-crds deploy-node-agent deploy-operator deploy-storage deploy-api cleanup-api \
   samples-ad-smoke samples-ldap-smoke
 
@@ -49,7 +49,10 @@ load-images: save-images
 	$(K3S_CTR) images import $(OPERATOR_TAR)
 	$(K3S_CTR) images import $(API_TAR)
 
-deploy-samples: deploy-crds deploy-node-agent deploy-operator deploy-storage
+deploy: deploy-crds deploy-node-agent deploy-operator deploy-storage deploy-api
+	@echo "NAS deployed."
+
+deploy-samples: deploy
 	$(KUBECTL) apply -k config/samples
 	@echo "Samples applied."
 	@$(MAKE) samples-smoke
@@ -68,11 +71,20 @@ samples-smoke:
 
 cleanup-samples:
 	-$(KUBECTL) delete -k config/samples --ignore-not-found=true
-	-$(KUBECTL) delete -k config/storage --ignore-not-found=true
+	-$(KUBECTL) -n $(NAMESPACE) delete deploy/smbshare-home-share svc/smbshare-home-share cm/smbshare-home-share-conf --ignore-not-found=true
+	-$(KUBECTL) -n $(NAMESPACE) delete deploy/smbshare-timemachine-share svc/smbshare-timemachine-share cm/smbshare-timemachine-share-conf --ignore-not-found=true
+	-$(KUBECTL) -n $(NAMESPACE) delete pvc timemachine-pvc --ignore-not-found=true
+	-$(KUBECTL) -n $(NAMESPACE) patch pvc timemachine-pvc --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+	@echo "Samples cleanup complete (CRDs + core stack preserved)."
+
+cleanup:
+	-$(KUBECTL) delete -k config/nas-api --ignore-not-found=true
 	-$(KUBECTL) delete -k config/operator --ignore-not-found=true
 	-$(KUBECTL) delete -k config/node-agent --ignore-not-found=true
+	-$(KUBECTL) delete -k config/storage --ignore-not-found=true
 	-$(KUBECTL) delete -k config/crd --ignore-not-found=true
-	@echo "Samples cleanup complete."
+	-$(KUBECTL) delete ns $(NAMESPACE) --ignore-not-found=true
+	@echo "Full cleanup complete."
 
 cleanup-api:
 	-$(KUBECTL) delete -k config/nas-api --ignore-not-found=true
