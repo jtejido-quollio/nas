@@ -1249,6 +1249,12 @@ func ensureNfs4DefaultAcl(dataset string, mountpoint string) (string, error) {
 	if mp == "" || mp == "none" || mp == "-" || mp == "legacy" {
 		return "", nil
 	}
+	if acltype, err := getDatasetPropertyValue(dataset, "acltype"); err == nil {
+		acltype = strings.ToLower(strings.TrimSpace(acltype))
+		if acltype != "" && acltype != "nfsv4" {
+			return fmt.Sprintf("acltype=%s; skipping nfs4 acl", acltype), nil
+		}
+	}
 
 	if _, err := exec.LookPath("nfs4_getfacl"); err == nil {
 		has, out, err := hasNfs4Acl(mp)
@@ -1263,6 +1269,10 @@ func ensureNfs4DefaultAcl(dataset string, mountpoint string) (string, error) {
 	aclSpec := "A::OWNER@:rwaDxtTnNcCoy,A::GROUP@:rwaDxtTnNcCoy,A::EVERYONE@:rxtncy"
 	out, err := runCmdCombined(context.Background(), 30*time.Second, "nfs4_setfacl", "-s", aclSpec, mp)
 	if err != nil {
+		lo := strings.ToLower(out)
+		if strings.Contains(lo, "operation to set acl not supported") {
+			return out, nil
+		}
 		return out, err
 	}
 	return out, nil
@@ -1343,6 +1353,18 @@ func getDatasetMountpoint(full string) (string, error) {
 	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "get", "-H", "-o", "value", "mountpoint", full)
 	if err != nil {
 		return out, fmt.Errorf("zfs get mountpoint failed: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func getDatasetPropertyValue(full string, prop string) (string, error) {
+	prop = strings.TrimSpace(prop)
+	if prop == "" {
+		return "", errors.New("property empty")
+	}
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "zfs", "get", "-H", "-o", "value", prop, full)
+	if err != nil {
+		return out, fmt.Errorf("zfs get %s failed: %w", prop, err)
 	}
 	return strings.TrimSpace(out), nil
 }
