@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	nasv1 "mnemosyne/api/v1alpha1"
@@ -22,11 +23,15 @@ func (r *ZDatasetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	ds := obj.Spec.DatasetName
 	props := obj.Spec.Properties
+	preset := strings.TrimSpace(obj.Spec.Preset)
 
 	na := NewNodeAgentClient(r.Cfg)
 	body := map[string]any{
 		"dataset":    ds,
 		"properties": props,
+	}
+	if preset != "" {
+		body["preset"] = preset
 	}
 	var out any
 	if err := na.do(ctx, "POST", "/v1/zfs/dataset/ensure", body, &out, nil); err != nil {

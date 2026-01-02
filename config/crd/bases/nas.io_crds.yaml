@@ -87,6 +87,7 @@ spec:
               properties:
                 nodeName: {type: string}
                 datasetName: {type: string}
+                preset: {type: string}
                 properties:
                   type: object
                   additionalProperties:

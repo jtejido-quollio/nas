@@ -6,8 +6,10 @@ metadata:
 spec:
   nodeName: worker-1
   datasetName: tank/nfs
+  preset: generic
   properties:
-    atime: "off"
+    acltype: posix
+    casesensitivity: sensitive
     compression: "lz4"
     mountpoint: /mnt/tank/nfs
     snapdir: visible

@@ -28,6 +28,22 @@ require_service() {
   fi
 }
 
+check_zfs_prop() {
+  local dataset="$1"
+  local prop="$2"
+  local expected="$3"
+  local actual
+  actual="$(${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- zfs get -H -o value "$prop" "$dataset" 2>/dev/null || true)"
+  if [[ -z "$actual" ]]; then
+    echo "Missing zfs property $prop for $dataset" >&2
+    exit 1
+  fi
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Unexpected $dataset $prop: expected '$expected', got '$actual'" >&2
+    exit 1
+  fi
+}
+
 log "Node-agent health"
 require_cmd "$CURL_BIN"
 $CURL_BIN -sf "$NODE_AGENT_URL/health" >/dev/null
@@ -57,13 +73,22 @@ ${KUBECTL_BIN} -n "${NAMESPACE}" get pods -o wide
 log "Sample CRs"
 ${KUBECTL_BIN} -n "${NAMESPACE}" get zpool,zdataset,nasshare,nasdirectory,nasuser,nasgroup,zsnapshotschedule,zsnapshotrestore 2>/dev/null || true
 
-log "NFS exports (node-agent)"
 node_agent_pod="$(${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app=nas-node-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [[ -n "$node_agent_pod" ]]; then
-  ${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- cat /etc/exports.d/nas.exports 2>/dev/null || echo "(no exports file yet)"
-else
+if [[ -z "$node_agent_pod" ]]; then
   echo "(node-agent pod not found)"
+  exit 1
 fi
+
+log "Dataset preset checks"
+check_zfs_prop "tank/home" "acltype" "nfsv4"
+check_zfs_prop "tank/home" "aclmode" "restricted"
+check_zfs_prop "tank/home" "casesensitivity" "insensitive"
+check_zfs_prop "tank/home" "atime" "on"
+check_zfs_prop "tank/nfs" "acltype" "posix"
+check_zfs_prop "tank/nfs" "casesensitivity" "sensitive"
+
+log "NFS exports (node-agent)"
+${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- cat /etc/exports.d/nas.exports 2>/dev/null || echo "(no exports file yet)"
 
 log "Host dependencies"
 dir_types="$(${KUBECTL_BIN} -n "${NAMESPACE}" get nasdirectory -o jsonpath='{.items[*].spec.type}' 2>/dev/null || true)"

@@ -6,8 +6,12 @@ metadata:
 spec:
   nodeName: worker-1
   datasetName: tank/home
+  preset: smb
   properties:
-    mountpoint: /mnt/tank/home
+    acltype: nfsv4
+    aclmode: restricted
+    casesensitivity: insensitive
+    atime: "on"
     compression: lz4
-    atime: "off"
+    mountpoint: /mnt/tank/home
     snapdir: visible

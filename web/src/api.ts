@@ -14,7 +14,13 @@ export type ZPool = {
 
 export type ZDataset = {
   metadata: { name: string };
-  spec: { nodeName?: string; datasetName?: string; mountpoint?: string; properties?: Record<string, string> };
+  spec: {
+    nodeName?: string;
+    datasetName?: string;
+    mountpoint?: string;
+    preset?: string;
+    properties?: Record<string, string>;
+  };
   status?: { phase?: string; message?: string };
 };
 

@@ -9,9 +9,11 @@ import (
 //
 // NOTE: This matches the existing CRD schema in config/crd/bases.
 type ZDatasetSpec struct {
-	NodeName    string            `json:"nodeName"`
-	DatasetName string            `json:"datasetName"`
-	Properties  map[string]string `json:"properties"`
+	NodeName    string `json:"nodeName"`
+	DatasetName string `json:"datasetName"`
+	// Preset indicates intent for ACL and dataset defaults (generic/smb/multiprotocol).
+	Preset     string            `json:"preset,omitempty"`
+	Properties map[string]string `json:"properties"`
 }
 
 type ZDatasetStatus struct {

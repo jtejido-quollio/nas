@@ -637,7 +637,7 @@ export default function App() {
     const datasetName = dataset.spec.datasetName || dataset.metadata.name;
     const { parent, name } = parseDatasetPath(datasetName);
     const properties = dataset.spec.properties ?? {};
-    const preset = inferDatasetPreset(properties);
+    const preset = (dataset.spec.preset as DatasetPreset | undefined) ?? inferDatasetPreset(properties);
     const defaultPreset = datasetPresetDefaults[preset];
     const mountpointValue = properties.mountpoint || dataset.spec.mountpoint || "";
     const mountpointMode =
@@ -854,6 +854,7 @@ export default function App() {
       await upsertZDataset(resourceName, {
         nodeName: datasetWizard.nodeName.trim(),
         datasetName,
+        preset: datasetWizard.preset,
         properties: buildDatasetProperties(datasetWizard)
       });
       closeDatasetWizard();
@@ -2229,7 +2230,7 @@ export default function App() {
                         </select>
                       </label>
                     </div>
-                    <div className="wizard-card">
+                    <div className="wizard-card preset-details">
                       <div className="wizard-card-title">Preset details</div>
                       <p className="wizard-card-sub">{datasetPresetDefaults[datasetWizard.preset].description}</p>
                       <div className="review-grid">

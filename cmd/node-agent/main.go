@@ -163,6 +163,7 @@ type PoolVdev struct {
 type ZDatasetEnsureRequest struct {
 	Dataset    string            `json:"dataset"`              // e.g. "tank/data" (legacy)
 	Mountpoint string            `json:"mountpoint,omitempty"` // optional
+	Preset     string            `json:"preset,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
 
@@ -170,6 +171,7 @@ type ZDatasetEnsureRequestV2 struct {
 	Pool       string            `json:"pool"`
 	Name       string            `json:"name"`       // e.g. "data"
 	Mountpoint string            `json:"mountpoint"` // optional
+	Preset     string            `json:"preset,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
 
@@ -521,7 +523,7 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, ZDatasetStatusResponse{OK: false, Error: "dataset required"})
 			return
 		}
-		out, err := ensureDataset(req.Dataset, req.Mountpoint, req.Properties)
+		out, err := ensureDataset(req.Dataset, req.Mountpoint, req.Preset, req.Properties)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZDatasetStatusResponse{OK: false, Output: out, Error: err.Error()})
 			return
@@ -545,7 +547,7 @@ func main() {
 			return
 		}
 		full := strings.TrimSpace(req.Pool) + "/" + strings.TrimSpace(req.Name)
-		out, err := ensureDataset(full, req.Mountpoint, req.Properties)
+		out, err := ensureDataset(full, req.Mountpoint, req.Preset, req.Properties)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ZDatasetStatusResponse{OK: false, Output: out, Error: err.Error()})
 			return
@@ -1102,7 +1104,7 @@ func isOctalMode(s string) bool {
 // Dataset operations
 // -----------------
 
-func ensureDataset(full string, mountpoint string, props map[string]string) (string, error) {
+func ensureDataset(full string, mountpoint string, preset string, props map[string]string) (string, error) {
 	full = strings.TrimSpace(full)
 	if full == "" {
 		return "", errors.New("dataset empty")
@@ -1143,7 +1145,141 @@ func ensureDataset(full string, mountpoint string, props map[string]string) (str
 	if mp := strings.TrimSpace(mountpoint); mp != "" {
 		_, _ = runCmdCombined(context.Background(), 30*time.Second, "zfs", "set", "mountpoint="+mp, full)
 	}
+
+	presetOut, presetErr := applyDatasetPreset(full, mountpoint, preset, props)
+	if strings.TrimSpace(presetOut) != "" {
+		out = strings.TrimSpace(out)
+		if out != "" {
+			out += "\n"
+		}
+		out += presetOut
+	}
+	if presetErr != nil {
+		return out, presetErr
+	}
 	return out, nil
+}
+
+const (
+	datasetPresetGeneric       = "generic"
+	datasetPresetSMB           = "smb"
+	datasetPresetMultiprotocol = "multiprotocol"
+)
+
+func getDatasetProperty(props map[string]string, key string) string {
+	if props == nil {
+		return ""
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return ""
+	}
+	for k, v := range props {
+		if strings.ToLower(strings.TrimSpace(k)) == key {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func normalizeDatasetPreset(preset string, props map[string]string) string {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	switch preset {
+	case datasetPresetGeneric, datasetPresetSMB, datasetPresetMultiprotocol:
+		return preset
+	case "multi", "multi-protocol", "multiproto":
+		return datasetPresetMultiprotocol
+	case "samba":
+		return datasetPresetSMB
+	}
+
+	acltype := strings.ToLower(getDatasetProperty(props, "acltype"))
+	aclmode := strings.ToLower(getDatasetProperty(props, "aclmode"))
+	if acltype == "nfsv4" {
+		if aclmode == "passthrough" {
+			return datasetPresetMultiprotocol
+		}
+		return datasetPresetSMB
+	}
+	if acltype == "posix" {
+		return datasetPresetGeneric
+	}
+	return ""
+}
+
+func applyDatasetPreset(full string, mountpoint string, preset string, props map[string]string) (string, error) {
+	preset = normalizeDatasetPreset(preset, props)
+	if preset == "" {
+		return "", nil
+	}
+	acltype := strings.ToLower(getDatasetProperty(props, "acltype"))
+
+	switch preset {
+	case datasetPresetGeneric:
+		if acltype != "" && acltype != "posix" {
+			return "", nil
+		}
+		return ensureDatasetMounted(full, mountpoint, "0755", false)
+	case datasetPresetSMB, datasetPresetMultiprotocol:
+		if acltype != "" && acltype != "nfsv4" {
+			return "", nil
+		}
+		return ensureNfs4DefaultAcl(full, mountpoint)
+	default:
+		return "", nil
+	}
+}
+
+func ensureNfs4DefaultAcl(dataset string, mountpoint string) (string, error) {
+	if _, err := exec.LookPath("nfs4_setfacl"); err != nil {
+		return "", fmt.Errorf("nfs4_setfacl not available: %w", err)
+	}
+	_, err := ensureDatasetMounted(dataset, mountpoint, "", false)
+	if err != nil {
+		return "", err
+	}
+	mp := strings.TrimSpace(mountpoint)
+	if mp == "" {
+		var err error
+		mp, err = getDatasetMountpoint(dataset)
+		if err != nil {
+			return "", err
+		}
+	}
+	if mp == "" || mp == "none" || mp == "-" || mp == "legacy" {
+		return "", nil
+	}
+
+	if _, err := exec.LookPath("nfs4_getfacl"); err == nil {
+		has, out, err := hasNfs4Acl(mp)
+		if err != nil {
+			return out, err
+		}
+		if has {
+			return out, nil
+		}
+	}
+
+	aclSpec := "A::OWNER@:rwaDxtTnNcCoy,A::GROUP@:rwaDxtTnNcCoy,A::EVERYONE@:rxtncy"
+	out, err := runCmdCombined(context.Background(), 30*time.Second, "nfs4_setfacl", "-s", aclSpec, mp)
+	if err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func hasNfs4Acl(path string) (bool, string, error) {
+	out, err := runCmdCombined(context.Background(), 15*time.Second, "nfs4_getfacl", path)
+	if err != nil {
+		return false, out, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "A:") || strings.HasPrefix(line, "A::") {
+			return true, out, nil
+		}
+	}
+	return false, out, nil
 }
 
 func ensureDatasetMounted(full string, mountpoint string, mode string, recursive bool) (string, error) {

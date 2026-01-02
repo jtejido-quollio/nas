@@ -19,7 +19,7 @@ RUN set -eux; \
     fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      util-linux udev gdisk parted smartmontools zfsutils-linux nvme-cli \
+      util-linux udev gdisk parted smartmontools zfsutils-linux nvme-cli nfs4-acl-tools \
       nfs-kernel-server nfs-common; \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/node-agent /usr/local/bin/node-agent
