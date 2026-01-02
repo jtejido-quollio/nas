@@ -51,6 +51,28 @@ type PoolWizardState = {
   spareDevices: string;
 };
 
+type DatasetPreset = "generic" | "smb" | "multiprotocol";
+
+type DatasetWizardState = {
+  step: number;
+  mode: "create" | "edit";
+  resourceName: string;
+  parentPath: string;
+  name: string;
+  nodeName: string;
+  preset: DatasetPreset;
+  mountpointMode: "inherit" | "custom";
+  mountpoint: string;
+  compression: string;
+  atime: "inherit" | "on" | "off";
+  caseSensitivity: "sensitive" | "insensitive";
+  sync: "inherit" | "standard" | "always" | "disabled";
+  quota: string;
+  refquota: string;
+  reservation: string;
+  refreservation: string;
+};
+
 type Column<T> = {
   label: string;
   render: (item: T) => ReactNode;
@@ -132,6 +154,45 @@ const poolWizardSteps = [
   "Review"
 ];
 
+const datasetWizardSteps = ["Name & Preset", "Options", "Quotas", "Review"];
+
+const datasetPresetDefaults: Record<
+  DatasetPreset,
+  {
+    label: string;
+    description: string;
+    aclType: string;
+    aclMode: string;
+    caseSensitivity: "sensitive" | "insensitive";
+    atime: "inherit" | "on" | "off";
+  }
+> = {
+  generic: {
+    label: "Generic",
+    description: "Default preset for NFS or general purpose datasets.",
+    aclType: "posix",
+    aclMode: "",
+    caseSensitivity: "sensitive",
+    atime: "inherit"
+  },
+  smb: {
+    label: "SMB",
+    description: "Optimized for SMB shares and Windows-style ACLs.",
+    aclType: "nfsv4",
+    aclMode: "restricted",
+    caseSensitivity: "insensitive",
+    atime: "on"
+  },
+  multiprotocol: {
+    label: "Multiprotocol",
+    description: "Balanced for SMB + NFS dual-mode access.",
+    aclType: "nfsv4",
+    aclMode: "passthrough",
+    caseSensitivity: "sensitive",
+    atime: "off"
+  }
+};
+
 function getStatus(phase?: string) {
   if (!phase) return "unknown";
   return phase.toLowerCase();
@@ -207,6 +268,41 @@ function formatGiB(bytes: number) {
   return `${Math.round(gib)} GiB`;
 }
 
+function datasetMountpoint(dataset: ZDataset) {
+  return dataset.spec.properties?.mountpoint || dataset.spec.mountpoint || "auto";
+}
+
+function parseDatasetPath(full: string) {
+  const trimmed = full.trim();
+  if (!trimmed.includes("/")) {
+    return { parent: trimmed, name: "" };
+  }
+  const parts = trimmed.split("/");
+  return {
+    parent: parts.slice(0, -1).join("/"),
+    name: parts[parts.length - 1] ?? ""
+  };
+}
+
+function makeDatasetResourceName(full: string) {
+  const base = full.trim().replace(/[\/_.:]+/g, "-").toLowerCase();
+  return base.replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "");
+}
+
+function inferDatasetPreset(properties?: Record<string, string>): DatasetPreset {
+  if (!properties) return "generic";
+  const acltype = properties.acltype?.toLowerCase();
+  const aclmode = properties.aclmode?.toLowerCase();
+  const casesensitivity = properties.casesensitivity?.toLowerCase();
+  if (acltype === "nfsv4" && aclmode === "restricted" && casesensitivity === "insensitive") {
+    return "smb";
+  }
+  if (acltype === "nfsv4" && aclmode === "passthrough") {
+    return "multiprotocol";
+  }
+  return "generic";
+}
+
 function validatePoolWizardStep(
   state: PoolWizardState,
   step: number,
@@ -243,6 +339,72 @@ function validatePoolWizardStep(
     }
   }
   return null;
+}
+
+function validateDatasetWizardStep(state: DatasetWizardState, step: number) {
+  const name = state.name.trim();
+  if (step >= 0) {
+    if (state.parentPath.trim() === "") {
+      return "Select a parent dataset or pool.";
+    }
+    if (name.length === 0) {
+      return "Dataset name is required.";
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(name)) {
+      return "Dataset name must use letters, numbers, dots, dashes, or underscores.";
+    }
+    if (name.includes("/")) {
+      return "Dataset name cannot include '/'. Use the parent selector for nesting.";
+    }
+    if (state.nodeName.trim() === "") {
+      return "Target node is required.";
+    }
+  }
+  if (step >= 1) {
+    if (state.mountpointMode === "custom" && state.mountpoint.trim() === "") {
+      return "Provide a mountpoint or switch to inherit.";
+    }
+  }
+  return null;
+}
+
+function buildDatasetProperties(state: DatasetWizardState) {
+  const props: Record<string, string> = {};
+  const preset = datasetPresetDefaults[state.preset];
+  if (preset.aclType) {
+    props.acltype = preset.aclType;
+  }
+  if (preset.aclMode) {
+    props.aclmode = preset.aclMode;
+  }
+  if (state.caseSensitivity) {
+    props.casesensitivity = state.caseSensitivity;
+  }
+  if (state.atime !== "inherit") {
+    props.atime = state.atime;
+  }
+  if (state.compression !== "inherit") {
+    props.compression = state.compression;
+  }
+  if (state.sync !== "inherit") {
+    props.sync = state.sync;
+  }
+  if (state.mountpointMode === "custom" && state.mountpoint.trim()) {
+    props.mountpoint = state.mountpoint.trim();
+  }
+  if (state.refquota.trim()) {
+    props.refquota = state.refquota.trim();
+  }
+  if (state.quota.trim()) {
+    props.quota = state.quota.trim();
+  }
+  if (state.refreservation.trim()) {
+    props.refreservation = state.refreservation.trim();
+  }
+  if (state.reservation.trim()) {
+    props.reservation = state.reservation.trim();
+  }
+  return props;
 }
 
 function ResourceTable<T extends { metadata: { name: string } }>(props: {
@@ -309,6 +471,8 @@ export default function App() {
   const [modalError, setModalError] = useState<string | null>(null);
   const [poolWizard, setPoolWizard] = useState<PoolWizardState | null>(null);
   const [poolWizardError, setPoolWizardError] = useState<string | null>(null);
+  const [datasetWizard, setDatasetWizard] = useState<DatasetWizardState | null>(null);
+  const [datasetWizardError, setDatasetWizardError] = useState<string | null>(null);
   const [disksModalOpen, setDisksModalOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
 
@@ -359,6 +523,32 @@ export default function App() {
   const diskCount = diskInventory?.count ?? diskInventory?.disks?.length ?? 0;
   const diskUpdated = diskInventory?.updated ?? "";
   const diskSelectionEnabled = !diskLoading && !diskError && diskInventory !== null;
+  const datasetParentOptions = useMemo(() => {
+    const options = new Map<string, { label: string; nodeName: string }>();
+    for (const pool of pools) {
+      const poolName = pool.spec.poolName || pool.metadata.name;
+      if (!poolName) continue;
+      options.set(poolName, { label: poolName, nodeName: pool.spec.nodeName || "" });
+    }
+    for (const dataset of datasets) {
+      const datasetName = dataset.spec.datasetName || dataset.metadata.name;
+      if (!datasetName) continue;
+      options.set(datasetName, { label: datasetName, nodeName: dataset.spec.nodeName || "" });
+    }
+    return Array.from(options.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([value, meta]) => ({ value, ...meta }));
+  }, [pools, datasets]);
+
+  const resolveNodeForPath = useCallback(
+    (path: string) => {
+      const datasetMatch = datasets.find((dataset) => dataset.spec.datasetName === path);
+      if (datasetMatch?.spec.nodeName) return datasetMatch.spec.nodeName;
+      const poolMatch = pools.find((pool) => pool.spec.poolName === path);
+      return poolMatch?.spec.nodeName || suggestedNodeName;
+    },
+    [datasets, pools, suggestedNodeName]
+  );
 
   const { errorCount, healthLabel } = useMemo(() => {
     const badPools = pools.filter((pool) => statusTone(pool.status?.phase) === "bad");
@@ -374,6 +564,30 @@ export default function App() {
 
   const handleCreate = (kind: ModalKind) => {
     setModalError(null);
+    if (kind === "datasets") {
+      const parentPath = datasetParentOptions[0]?.value ?? "";
+      setDatasetWizardError(null);
+      setDatasetWizard({
+        step: 0,
+        mode: "create",
+        resourceName: "",
+        parentPath,
+        name: "",
+        nodeName: resolveNodeForPath(parentPath),
+        preset: "generic",
+        mountpointMode: "inherit",
+        mountpoint: "",
+        compression: "inherit",
+        atime: datasetPresetDefaults.generic.atime,
+        caseSensitivity: datasetPresetDefaults.generic.caseSensitivity,
+        sync: "inherit",
+        quota: "",
+        refquota: "",
+        reservation: "",
+        refreservation: ""
+      });
+      return;
+    }
     setModal({
       kind,
       mode: "create",
@@ -405,6 +619,51 @@ export default function App() {
   const closePoolWizard = () => {
     setPoolWizard(null);
     setPoolWizardError(null);
+  };
+
+  const closeDatasetWizard = () => {
+    setDatasetWizard(null);
+    setDatasetWizardError(null);
+  };
+
+  const updateDatasetWizard = (changes: Partial<DatasetWizardState>) => {
+    setDatasetWizard((current) => (current ? { ...current, ...changes } : current));
+    if (datasetWizardError) {
+      setDatasetWizardError(null);
+    }
+  };
+
+  const openDatasetWizardEdit = (dataset: ZDataset) => {
+    const datasetName = dataset.spec.datasetName || dataset.metadata.name;
+    const { parent, name } = parseDatasetPath(datasetName);
+    const properties = dataset.spec.properties ?? {};
+    const preset = inferDatasetPreset(properties);
+    const defaultPreset = datasetPresetDefaults[preset];
+    const mountpointValue = properties.mountpoint || dataset.spec.mountpoint || "";
+    const mountpointMode =
+      mountpointValue && mountpointValue !== "inherit" && mountpointValue !== "auto" ? "custom" : "inherit";
+    setDatasetWizardError(null);
+    setDatasetWizard({
+      step: 0,
+      mode: "edit",
+      resourceName: dataset.metadata.name,
+      parentPath: parent,
+      name: name || dataset.metadata.name,
+      nodeName: dataset.spec.nodeName || resolveNodeForPath(parent),
+      preset,
+      mountpointMode,
+      mountpoint: mountpointMode === "custom" ? mountpointValue : "",
+      compression: properties.compression ?? "inherit",
+      atime: (properties.atime as DatasetWizardState["atime"]) ?? defaultPreset.atime,
+      caseSensitivity:
+        (properties.casesensitivity as DatasetWizardState["caseSensitivity"]) ??
+        defaultPreset.caseSensitivity,
+      sync: (properties.sync as DatasetWizardState["sync"]) ?? "inherit",
+      quota: properties.quota ?? "",
+      refquota: properties.refquota ?? "",
+      reservation: properties.reservation ?? "",
+      refreservation: properties.refreservation ?? ""
+    });
   };
 
   const updatePoolWizard = (changes: Partial<PoolWizardState>) => {
@@ -561,8 +820,58 @@ export default function App() {
     }
   };
 
+  const handleDatasetWizardStep = (direction: "next" | "back") => {
+    if (!datasetWizard) return;
+    if (direction === "next") {
+      const message = validateDatasetWizardStep(datasetWizard, datasetWizard.step);
+      if (message) {
+        setDatasetWizardError(message);
+        return;
+      }
+    }
+    const step = direction === "next" ? datasetWizard.step + 1 : datasetWizard.step - 1;
+    updateDatasetWizard({ step: Math.min(Math.max(step, 0), datasetWizardSteps.length - 1) });
+  };
+
+  const handleDatasetWizardSave = async () => {
+    if (!datasetWizard) return;
+    const message = validateDatasetWizardStep(datasetWizard, datasetWizardSteps.length - 1);
+    if (message) {
+      setDatasetWizardError(message);
+      return;
+    }
+    const datasetName = `${datasetWizard.parentPath.trim()}/${datasetWizard.name.trim()}`;
+    const resourceName =
+      datasetWizard.mode === "edit"
+        ? datasetWizard.resourceName
+        : makeDatasetResourceName(datasetName);
+    if (!resourceName) {
+      setDatasetWizardError("Dataset resource name could not be derived.");
+      return;
+    }
+    setActionBusy(true);
+    try {
+      await upsertZDataset(resourceName, {
+        nodeName: datasetWizard.nodeName.trim(),
+        datasetName,
+        properties: buildDatasetProperties(datasetWizard)
+      });
+      closeDatasetWizard();
+      await refreshAll();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Dataset save failed";
+      setDatasetWizardError(errorMessage);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const handleEdit = (kind: ModalKind, item: { metadata: { name: string }; spec?: object }) => {
     setModalError(null);
+    if (kind === "datasets") {
+      openDatasetWizardEdit(item as ZDataset);
+      return;
+    }
     setModal({
       kind,
       mode: "edit",
@@ -647,6 +956,7 @@ export default function App() {
 
   const busy = loading || snapshotsLoading || actionBusy;
   const view = viewMeta[activeView];
+  const datasetCreateDisabled = busy || datasetParentOptions.length === 0;
   const autoSelectionReady = diskSelectionEnabled && autoSelection.sizes.length > 0;
   const autoWidthOptions = useMemo(() => {
     if (!poolWizard || !autoSelectionReady) return [];
@@ -688,6 +998,15 @@ export default function App() {
       vdevs
     };
   }, [poolWizard, effectiveSelectionMode, autoSelection]);
+  const datasetWizardSpec = useMemo(() => {
+    if (!datasetWizard) return null;
+    const datasetName = `${datasetWizard.parentPath.trim()}/${datasetWizard.name.trim()}`;
+    return {
+      nodeName: datasetWizard.nodeName.trim(),
+      datasetName,
+      properties: buildDatasetProperties(datasetWizard)
+    };
+  }, [datasetWizard]);
 
   return (
     <div className="app">
@@ -842,7 +1161,7 @@ export default function App() {
                         <li key={dataset.metadata.name} className="list-item">
                           <div>
                             <div className="list-title">{dataset.spec.datasetName || dataset.metadata.name}</div>
-                            <div className="list-sub">{dataset.spec.mountpoint || "auto"}</div>
+                            <div className="list-sub">{datasetMountpoint(dataset)}</div>
                           </div>
                           <span className={`status ${statusTone(dataset.status?.phase)}`}>
                             {dataset.status?.phase ?? "Unknown"}
@@ -1171,7 +1490,12 @@ export default function App() {
                 <h2>Datasets</h2>
                 <p className="page-sub">Manage datasets and their properties.</p>
               </div>
-              <button className="primary" onClick={() => handleCreate("datasets")} disabled={busy}>
+              <button
+                className="primary"
+                onClick={() => handleCreate("datasets")}
+                disabled={datasetCreateDisabled}
+                title={datasetCreateDisabled ? "Create a pool first to add datasets." : ""}
+              >
                 Create Dataset
               </button>
             </div>
@@ -1181,7 +1505,7 @@ export default function App() {
                 { label: "Name", render: (dataset) => dataset.metadata.name },
                 { label: "Dataset", render: (dataset) => dataset.spec.datasetName || "" },
                 { label: "Node", render: (dataset) => dataset.spec.nodeName || "" },
-                { label: "Mount", render: (dataset) => dataset.spec.mountpoint || "auto" },
+                { label: "Mount", render: (dataset) => datasetMountpoint(dataset) },
                 { label: "Status", render: (dataset) => <span className={`status ${statusTone(dataset.status?.phase)}`}>
                     {dataset.status?.phase ?? "Unknown"}
                   </span> }
@@ -1778,6 +2102,442 @@ export default function App() {
               ) : (
                 <button className="primary" onClick={handlePoolWizardCreate} disabled={actionBusy}>
                   Create Pool
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {datasetWizard && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal modal-wide">
+            <div className="modal-header">
+              <div>
+                <div className="modal-eyebrow">Datasets</div>
+                <h3>{datasetWizard.mode === "edit" ? "Edit Dataset" : "Add Dataset"}</h3>
+              </div>
+              <button className="icon-button" onClick={closeDatasetWizard} aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="wizard">
+              <aside className="wizard-steps">
+                {datasetWizardSteps.map((label, index) => (
+                  <div
+                    key={label}
+                    className={`wizard-step${datasetWizard.step === index ? " active" : ""}${
+                      datasetWizard.step > index ? " done" : ""
+                    }`}
+                  >
+                    <span className="wizard-step-index">{index + 1}</span>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </aside>
+              <div className="wizard-panel">
+                {datasetWizard.step === 0 && (
+                  <div className="wizard-section">
+                    <h4>Name & Preset</h4>
+                    <div className="wizard-grid">
+                      <label className="form-field">
+                        <span className="field-label">
+                          Parent path *
+                          <span
+                            className="field-help"
+                            title="Choose the pool or parent dataset that will contain this dataset."
+                          >
+                            ?
+                          </span>
+                        </span>
+                        <select
+                          value={datasetWizard.parentPath}
+                          onChange={(event) =>
+                            updateDatasetWizard({
+                              parentPath: event.target.value,
+                              nodeName: resolveNodeForPath(event.target.value)
+                            })
+                          }
+                          disabled={datasetWizard.mode === "edit"}
+                        >
+                          <option value="">Select parent</option>
+                          {datasetParentOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span className="field-label">
+                          Dataset name *
+                          <span
+                            className="field-help"
+                            title="Short dataset name (no slashes). Names cannot be changed after creation."
+                          >
+                            ?
+                          </span>
+                        </span>
+                        <input
+                          type="text"
+                          value={datasetWizard.name}
+                          placeholder="home"
+                          onChange={(event) => updateDatasetWizard({ name: event.target.value })}
+                          disabled={datasetWizard.mode === "edit"}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span className="field-label">
+                          Target node *
+                          <span
+                            className="field-help"
+                            title="Kubernetes node where ZFS operations are executed."
+                          >
+                            ?
+                          </span>
+                        </span>
+                        <input
+                          type="text"
+                          value={datasetWizard.nodeName}
+                          placeholder="worker-1"
+                          onChange={(event) => updateDatasetWizard({ nodeName: event.target.value })}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span className="field-label">
+                          Dataset preset *
+                          <span
+                            className="field-help"
+                            title="Preset controls ACL, case sensitivity, and atime defaults."
+                          >
+                            ?
+                          </span>
+                        </span>
+                        <select
+                          value={datasetWizard.preset}
+                          onChange={(event) => {
+                            const preset = event.target.value as DatasetPreset;
+                            const defaults = datasetPresetDefaults[preset];
+                            updateDatasetWizard({
+                              preset,
+                              atime: defaults.atime,
+                              caseSensitivity: defaults.caseSensitivity
+                            });
+                          }}
+                          disabled={datasetWizard.mode === "edit"}
+                        >
+                          {Object.entries(datasetPresetDefaults).map(([key, preset]) => (
+                            <option key={key} value={key}>
+                              {preset.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="wizard-card">
+                      <div className="wizard-card-title">Preset details</div>
+                      <p className="wizard-card-sub">{datasetPresetDefaults[datasetWizard.preset].description}</p>
+                      <div className="review-grid">
+                        <div>
+                          <div className="review-label">ACL type</div>
+                          <div className="review-value">{datasetPresetDefaults[datasetWizard.preset].aclType}</div>
+                        </div>
+                        <div>
+                          <div className="review-label">ACL mode</div>
+                          <div className="review-value">
+                            {datasetPresetDefaults[datasetWizard.preset].aclMode || "Inherit"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="review-label">Case sensitivity</div>
+                          <div className="review-value">{datasetPresetDefaults[datasetWizard.preset].caseSensitivity}</div>
+                        </div>
+                        <div>
+                          <div className="review-label">Atime</div>
+                          <div className="review-value">{datasetPresetDefaults[datasetWizard.preset].atime}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="wizard-hint">
+                      Preset, dataset name, and case sensitivity cannot be changed after creation.
+                    </p>
+                  </div>
+                )}
+
+                {datasetWizard.step === 1 && (
+                  <div className="wizard-section">
+                    <h4>Options</h4>
+                    <div className="wizard-grid">
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">Mountpoint</div>
+                        <p className="wizard-card-sub">Inherit the parent mountpoint or set a custom path.</p>
+                        <div className="wizard-toggle">
+                          <button
+                            className={`toggle-button ${datasetWizard.mountpointMode === "inherit" ? "active" : ""}`}
+                            onClick={() => updateDatasetWizard({ mountpointMode: "inherit" })}
+                          >
+                            Inherit
+                          </button>
+                          <button
+                            className={`toggle-button ${datasetWizard.mountpointMode === "custom" ? "active" : ""}`}
+                            onClick={() => updateDatasetWizard({ mountpointMode: "custom" })}
+                          >
+                            Custom
+                          </button>
+                        </div>
+                        {datasetWizard.mountpointMode === "custom" && (
+                          <label className="form-field">
+                            <span className="field-label">
+                              Custom mountpoint *
+                              <span className="field-help" title="Absolute mountpoint path for this dataset.">
+                                ?
+                              </span>
+                            </span>
+                            <input
+                              type="text"
+                              value={datasetWizard.mountpoint}
+                              placeholder="/mnt/tank/home"
+                              onChange={(event) => updateDatasetWizard({ mountpoint: event.target.value })}
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">Compression</div>
+                        <p className="wizard-card-sub">Balance storage savings with CPU cost.</p>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Compression level
+                            <span className="field-help" title="Choose an on-disk compression algorithm.">
+                              ?
+                            </span>
+                          </span>
+                          <select
+                            value={datasetWizard.compression}
+                            onChange={(event) => updateDatasetWizard({ compression: event.target.value })}
+                          >
+                            <option value="inherit">Inherit</option>
+                            <option value="lz4">LZ4</option>
+                            <option value="zstd">ZSTD</option>
+                            <option value="zstd-fast">ZSTD-FAST</option>
+                            <option value="zstd-1">ZSTD-1</option>
+                            <option value="zstd-2">ZSTD-2</option>
+                            <option value="zstd-3">ZSTD-3</option>
+                            <option value="gzip">GZIP</option>
+                            <option value="gzip-1">GZIP-1</option>
+                            <option value="gzip-9">GZIP-9</option>
+                            <option value="zle">ZLE</option>
+                            <option value="lzjb">LZJB</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">Filesystem Behavior</div>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Case sensitivity
+                            <span className="field-help" title="Sensitive or insensitive names. Immutable once created.">
+                              ?
+                            </span>
+                          </span>
+                          <select
+                            value={datasetWizard.caseSensitivity}
+                            onChange={(event) =>
+                              updateDatasetWizard({
+                                caseSensitivity: event.target.value as DatasetWizardState["caseSensitivity"]
+                              })
+                            }
+                            disabled={datasetWizard.mode === "edit"}
+                          >
+                            <option value="sensitive">Sensitive</option>
+                            <option value="insensitive">Insensitive</option>
+                          </select>
+                        </label>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Atime
+                            <span className="field-help" title="Update access time on read operations.">
+                              ?
+                            </span>
+                          </span>
+                          <select
+                            value={datasetWizard.atime}
+                            onChange={(event) =>
+                              updateDatasetWizard({ atime: event.target.value as DatasetWizardState["atime"] })
+                            }
+                          >
+                            <option value="inherit">Inherit</option>
+                            <option value="on">On</option>
+                            <option value="off">Off</option>
+                          </select>
+                        </label>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Sync policy
+                            <span className="field-help" title="Controls synchronous write behavior.">
+                              ?
+                            </span>
+                          </span>
+                          <select
+                            value={datasetWizard.sync}
+                            onChange={(event) =>
+                              updateDatasetWizard({ sync: event.target.value as DatasetWizardState["sync"] })
+                            }
+                          >
+                            <option value="inherit">Inherit</option>
+                            <option value="standard">Standard</option>
+                            <option value="always">Always</option>
+                            <option value="disabled">Disabled</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {datasetWizard.step === 2 && (
+                  <div className="wizard-section">
+                    <h4>Quotas</h4>
+                    <div className="wizard-grid">
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">This Dataset</div>
+                        <p className="wizard-card-sub">Limits apply only to this dataset (refquota).</p>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Quota for this dataset
+                            <span className="field-help" title="Maximum space allowed for this dataset. Use 0 for unlimited.">
+                              ?
+                            </span>
+                          </span>
+                          <input
+                            type="text"
+                            value={datasetWizard.refquota}
+                            placeholder="0"
+                            onChange={(event) => updateDatasetWizard({ refquota: event.target.value })}
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Reserved space for this dataset
+                            <span className="field-help" title="Reserve space for this dataset only.">
+                              ?
+                            </span>
+                          </span>
+                          <input
+                            type="text"
+                            value={datasetWizard.refreservation}
+                            placeholder="0"
+                            onChange={(event) => updateDatasetWizard({ refreservation: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <div className="wizard-card">
+                        <div className="wizard-card-title">Dataset + Children</div>
+                        <p className="wizard-card-sub">Limits apply to this dataset and all descendants.</p>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Quota for this dataset and all children
+                            <span className="field-help" title="Maximum space allowed for this dataset and its children.">
+                              ?
+                            </span>
+                          </span>
+                          <input
+                            type="text"
+                            value={datasetWizard.quota}
+                            placeholder="0"
+                            onChange={(event) => updateDatasetWizard({ quota: event.target.value })}
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span className="field-label">
+                            Reserved space for this dataset and all children
+                            <span className="field-help" title="Reserve space for this dataset and its children.">
+                              ?
+                            </span>
+                          </span>
+                          <input
+                            type="text"
+                            value={datasetWizard.reservation}
+                            placeholder="0"
+                            onChange={(event) => updateDatasetWizard({ reservation: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    <p className="wizard-hint">Quota alert thresholds are not wired yet.</p>
+                  </div>
+                )}
+
+                {datasetWizard.step === datasetWizardSteps.length - 1 && (
+                  <div className="wizard-section">
+                    <h4>Review</h4>
+                    <div className="review-grid">
+                      <div>
+                        <div className="review-label">Dataset path</div>
+                        <div className="review-value">
+                          {datasetWizard.parentPath}/{datasetWizard.name}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="review-label">Target node</div>
+                        <div className="review-value">{datasetWizard.nodeName || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Preset</div>
+                        <div className="review-value">{datasetPresetDefaults[datasetWizard.preset].label}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Mountpoint</div>
+                        <div className="review-value">
+                          {datasetWizard.mountpointMode === "custom" ? datasetWizard.mountpoint : "Inherit"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="review-label">Compression</div>
+                        <div className="review-value">{datasetWizard.compression}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Case sensitivity</div>
+                        <div className="review-value">{datasetWizard.caseSensitivity}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Atime</div>
+                        <div className="review-value">{datasetWizard.atime}</div>
+                      </div>
+                      <div>
+                        <div className="review-label">Sync</div>
+                        <div className="review-value">{datasetWizard.sync}</div>
+                      </div>
+                    </div>
+                    <div className="review-code">
+                      <div className="review-label">Spec preview</div>
+                      <pre>{JSON.stringify(datasetWizardSpec, null, 2)}</pre>
+                    </div>
+                  </div>
+                )}
+                {datasetWizardError && <div className="modal-error">{datasetWizardError}</div>}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost" onClick={closeDatasetWizard} disabled={actionBusy}>
+                Cancel
+              </button>
+              <button
+                className="ghost"
+                onClick={() => handleDatasetWizardStep("back")}
+                disabled={actionBusy || datasetWizard.step === 0}
+              >
+                Back
+              </button>
+              {datasetWizard.step < datasetWizardSteps.length - 1 ? (
+                <button className="primary" onClick={() => handleDatasetWizardStep("next")} disabled={actionBusy}>
+                  Next
+                </button>
+              ) : (
+                <button className="primary" onClick={handleDatasetWizardSave} disabled={actionBusy}>
+                  {datasetWizard.mode === "edit" ? "Save Dataset" : "Create Dataset"}
                 </button>
               )}
             </div>
