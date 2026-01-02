@@ -2191,17 +2191,12 @@ export default function App() {
                           Target node *
                           <span
                             className="field-help"
-                            title="Kubernetes node where ZFS operations are executed."
+                            title="Inherited from the selected parent pool or dataset."
                           >
                             ?
                           </span>
                         </span>
-                        <input
-                          type="text"
-                          value={datasetWizard.nodeName}
-                          placeholder="worker-1"
-                          onChange={(event) => updateDatasetWizard({ nodeName: event.target.value })}
-                        />
+                        <input type="text" value={datasetWizard.nodeName} readOnly disabled />
                       </label>
                       <label className="form-field">
                         <span className="field-label">
