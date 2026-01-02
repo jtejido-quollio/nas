@@ -32,12 +32,20 @@ check_zfs_prop() {
   local dataset="$1"
   local prop="$2"
   local expected="$3"
-  local actual
-  actual="$(${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- zfs get -H -o value "$prop" "$dataset" 2>/dev/null || true)"
-  if [[ -z "$actual" ]]; then
-    echo "Missing zfs property $prop for $dataset" >&2
-    exit 1
-  fi
+  local actual=""
+  local start
+  start=$(date +%s)
+  while true; do
+    actual="$(${KUBECTL_BIN} -n "${NAMESPACE}" exec "$node_agent_pod" -- zfs get -H -o value "$prop" "$dataset" 2>/dev/null || true)"
+    if [[ -n "$actual" ]]; then
+      break
+    fi
+    if (( $(date +%s) - start > 120 )); then
+      echo "Missing zfs property $prop for $dataset" >&2
+      exit 1
+    fi
+    sleep 2
+  done
   if [[ "$actual" != "$expected" ]]; then
     echo "Unexpected $dataset $prop: expected '$expected', got '$actual'" >&2
     exit 1
